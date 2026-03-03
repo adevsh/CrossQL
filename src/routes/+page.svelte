@@ -15,6 +15,60 @@
   let schemaError = $state<string | null>(null);
   let schemaFields = $state<Array<{ name: string; dtype: string }>>([]);
 
+  let usageState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  let usageError = $state<string | null>(null);
+  let usageCpuPercent = $state<number | null>(null);
+  let usageMemoryBytes = $state<number | null>(null);
+
+  function applySchemaMap(fields: Array<{ name: string; dtype: string }>, cfg: any) {
+    const map = new Map<string, string>(fields.map((f) => [f.name, f.dtype]));
+    const cols: any[] = cfg?.columns ?? [];
+    for (const c of cols) {
+      const source = typeof c?.source === 'string' ? c.source.trim() : '';
+      if (!source) continue;
+      const sourceDtype = map.get(source);
+      if (!sourceDtype) continue;
+      const rename = typeof c?.rename === 'string' ? c.rename.trim() : '';
+      const cast = typeof c?.cast === 'string' ? c.cast.trim() : '';
+      const targetName = rename || source;
+      const targetDtype = cast ? cast : sourceDtype;
+      if (targetName !== source) map.delete(source);
+      map.set(targetName, targetDtype);
+    }
+    return Array.from(map.entries()).map(([name, dtype]) => ({ name, dtype }));
+  }
+
+  async function fetchSchemaForNode(nodeId: string, depth = 0): Promise<Array<{ name: string; dtype: string }>> {
+    if (depth > 20) throw new Error('Schema resolution exceeded max depth');
+    const node = nodes.find((n: any) => n.id === nodeId);
+    if (!node) throw new Error('Node not found');
+
+    if (node.type === 'schema_map') {
+      const incomingEdges = edges.filter((e: any) => e.target === node.id);
+      if (incomingEdges.length !== 1) throw new Error('Schema Map must have exactly one incoming edge');
+      const upstreamId = incomingEdges[0].source;
+      const upstreamSchema = await fetchSchemaForNode(upstreamId, depth + 1);
+      return applySchemaMap(upstreamSchema, node.data?.config);
+    }
+
+    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra') {
+      throw new Error('Schema preview is only available for source and Schema Map nodes');
+    }
+
+    if (!node.data?.config) throw new Error('Missing node config');
+
+    const command =
+      node.type === 'postgres'
+        ? 'preview_postgres_schema'
+        : node.type === 'mysql'
+          ? 'preview_mysql_schema'
+          : node.type === 'mongodb'
+            ? 'preview_mongodb_schema'
+            : 'preview_cassandra_schema';
+    const result = await invoke(command, { source: node.data.config });
+    return (result as any[])?.map((x: any) => ({ name: x.name, dtype: x.dtype })) ?? [];
+  }
+
   function nextPosition() {
     const baseX = 120;
     const baseY = 120;
@@ -29,7 +83,7 @@
     return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
   }
 
-  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'parquet') {
+  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'schema_map' | 'parquet') {
     const id = newId(type);
     const position = nextPosition();
 
@@ -118,6 +172,19 @@
       return;
     }
 
+    if (type === 'schema_map') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { columns: [] } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
     nodes = [
       ...nodes,
       {
@@ -150,21 +217,11 @@
     if (!selectedNodeId) return;
     const node = nodes.find((n: any) => n.id === selectedNodeId);
     if (!node) return;
-    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra') return;
-    if (!node.data?.config) return;
+    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && node.type !== 'schema_map') return;
 
     schemaState = 'loading';
     try {
-      const command =
-        node.type === 'postgres'
-          ? 'preview_postgres_schema'
-          : node.type === 'mysql'
-            ? 'preview_mysql_schema'
-            : node.type === 'mongodb'
-              ? 'preview_mongodb_schema'
-              : 'preview_cassandra_schema';
-      const result = await invoke(command, { source: node.data.config });
-      schemaFields = (result as any[])?.map((x: any) => ({ name: x.name, dtype: x.dtype })) ?? [];
+      schemaFields = await fetchSchemaForNode(selectedNodeId);
       schemaState = 'ready';
     } catch (e) {
       schemaState = 'error';
@@ -188,6 +245,29 @@
     return `${n.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
   }
 
+  async function loadUsage() {
+    usageState = 'loading';
+    usageError = null;
+    try {
+      const result = await invoke('get_process_usage');
+      const r = result as any;
+      usageCpuPercent = typeof r?.cpu_percent === 'number' ? r.cpu_percent : null;
+      usageMemoryBytes = typeof r?.memory_bytes === 'number' ? r.memory_bytes : null;
+      usageState = 'ready';
+    } catch (e) {
+      usageState = 'error';
+      usageError = `${e}`;
+      usageCpuPercent = null;
+      usageMemoryBytes = null;
+    }
+  }
+
+  $effect(() => {
+    void loadUsage();
+    const id = setInterval(() => void loadUsage(), 5000);
+    return () => clearInterval(id);
+  });
+
   async function testInvoke() {
     runState = 'running';
     runRowCount = null;
@@ -209,23 +289,53 @@
       return;
     }
 
-    const sourceNodeId = incomingEdges[0].source;
-    const sourceNode = nodes.find((n: any) => n.id === sourceNodeId);
-    if (!sourceNode) {
+    let cursorId = incomingEdges[0].source;
+    const schema_maps: any[] = [];
+    let sourceNode: any | null = null;
+    for (let depth = 0; depth < 20; depth += 1) {
+      const node = nodes.find((n: any) => n.id === cursorId);
+      if (!node) {
+        runState = 'error';
+        invokeResult = "Error: Output edge source node not found";
+        return;
+      }
+
+      if (node.type === 'schema_map') {
+        if (!node?.data?.config) {
+          runState = 'error';
+          invokeResult = "Error: Missing Schema Map node config";
+          return;
+        }
+        schema_maps.push(node.data.config);
+        const inc = edges.filter((e: any) => e.target === node.id);
+        if (inc.length !== 1) {
+          runState = 'error';
+          invokeResult = "Error: Schema Map must have exactly one incoming edge";
+          return;
+        }
+        cursorId = inc[0].source;
+        continue;
+      }
+
+      if (node.type === 'postgres' || node.type === 'mysql' || node.type === 'mongodb' || node.type === 'cassandra') {
+        sourceNode = node;
+        break;
+      }
+
       runState = 'error';
-      invokeResult = "Error: Output edge source node not found";
+      invokeResult = "Error: Output must be connected from a source (optionally via Schema Map)";
       return;
     }
 
-    if (sourceNode.type !== 'postgres' && sourceNode.type !== 'mysql' && sourceNode.type !== 'mongodb' && sourceNode.type !== 'cassandra') {
+    if (!sourceNode) {
       runState = 'error';
-      invokeResult = "Error: Output must be connected from a source node";
+      invokeResult = "Error: Unable to resolve pipeline source";
       return;
     }
 
     if (!sourceNode?.data?.config) {
       runState = 'error';
-      invokeResult = "Error: Missing Postgres node config";
+      invokeResult = "Error: Missing source node config";
       return;
     }
 
@@ -319,7 +429,10 @@
             : sourceNode.type === 'mongodb'
               ? 'run_mongodb_to_parquet'
               : 'run_cassandra_to_parquet';
-      const result = await invoke(command, { source, output });
+      const schemaMapsOrdered = schema_maps.reverse();
+      const payload: any = { source, output };
+      if (schemaMapsOrdered.length > 0) payload.schema_maps = schemaMapsOrdered;
+      const result = await invoke(command, payload);
       const r = result as any;
       runRowCount = typeof r?.row_count === 'number' ? r.row_count : null;
       runFileSizeBytes = typeof r?.file_size_bytes === 'number' ? r.file_size_bytes : null;
@@ -393,6 +506,20 @@
           </button>
         </div>
       </div>
+
+      <div>
+        <div class="text-xs text-warm-sub font-semibold mb-2">Transforms</div>
+        <div class="flex flex-col gap-2">
+          <button
+            type="button"
+            onclick={() => addNode('schema_map')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>🔀</span><span>Schema Map</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+        </div>
+      </div>
     </div>
     
     <div class="mt-auto border-t border-warm-border pt-4">
@@ -422,46 +549,73 @@
   </main>
 
   <!-- Config Panel -->
-  <aside class="w-80 bg-warm-panel border-l border-warm-border p-4">
+  <aside class="w-80 bg-warm-panel border-l border-warm-border p-4 flex flex-col">
     <h2 class="text-warm-text font-bold mb-4">Configuration</h2>
-    {#if selectedNodeId}
-      {@const selectedNode = nodes.find((n: any) => n.id === selectedNodeId)}
-      {#if selectedNode}
-        <div class="text-sm text-warm-text font-medium mb-1">
-          {selectedNode.type} ({selectedNode.id})
-        </div>
-        {#if selectedNode.type === 'postgres' || selectedNode.type === 'mysql' || selectedNode.type === 'mongodb' || selectedNode.type === 'cassandra'}
-          <div class="text-xs text-warm-sub mb-2">Schema</div>
-          {#if schemaState === 'loading'}
-            <div class="text-xs text-warm-muted">Loading…</div>
-          {:else if schemaState === 'error'}
-            <div class="text-xs text-[#B85C4A]">{schemaError}</div>
-          {:else if schemaState === 'ready'}
-            {#if schemaFields.length === 0}
-              <div class="text-xs text-warm-muted">No columns</div>
+    <div class="flex-1 overflow-auto">
+      {#if selectedNodeId}
+        {@const selectedNode = nodes.find((n: any) => n.id === selectedNodeId)}
+        {#if selectedNode}
+          <div class="text-sm text-warm-text font-medium mb-1">
+            {selectedNode.type} ({selectedNode.id})
+          </div>
+          {#if selectedNode.type === 'postgres' || selectedNode.type === 'mysql' || selectedNode.type === 'mongodb' || selectedNode.type === 'cassandra' || selectedNode.type === 'schema_map'}
+            <div class="text-xs text-warm-sub mb-2">
+              {selectedNode.type === 'schema_map' ? 'Schema (after map)' : 'Schema'}
+            </div>
+            {#if schemaState === 'loading'}
+              <div class="text-xs text-warm-muted">Loading…</div>
+            {:else if schemaState === 'error'}
+              <div class="text-xs text-[#B85C4A]">{schemaError}</div>
+            {:else if schemaState === 'ready'}
+              {#if schemaFields.length === 0}
+                <div class="text-xs text-warm-muted">No columns</div>
+              {:else}
+                <div class="flex flex-col gap-2">
+                  {#each schemaFields as f (f.name)}
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="text-xs text-warm-text truncate">{f.name}</div>
+                      <TypeBadge dtype={f.dtype} />
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             {:else}
-              <div class="flex flex-col gap-2">
-                {#each schemaFields as f (f.name)}
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="text-xs text-warm-text truncate">{f.name}</div>
-                    <TypeBadge dtype={f.dtype} />
-                  </div>
-                {/each}
-              </div>
+              <div class="text-xs text-warm-muted">Select a source node to preview schema</div>
             {/if}
           {:else}
-            <div class="text-xs text-warm-muted">Select a source node to preview schema</div>
+            <div class="text-xs text-warm-muted">No schema preview for this node type</div>
           {/if}
         {:else}
-          <div class="text-xs text-warm-muted">No schema preview for this node type</div>
+          <div class="text-warm-muted text-sm italic">Select a node</div>
         {/if}
       {:else}
-        <div class="text-warm-muted text-sm italic">Select a node</div>
+        <div class="text-warm-muted text-sm italic">
+          Select a node to see its schema
+        </div>
       {/if}
-    {:else}
-      <div class="text-warm-muted text-sm italic">
-        Select a node to see its schema
-      </div>
-    {/if}
+    </div>
+
+    <div class="mt-4 border-t border-warm-border pt-3">
+      <div class="text-xs text-warm-sub font-semibold mb-2">App Usage</div>
+      {#if usageState === 'loading'}
+        <div class="text-xs text-warm-muted">Loading…</div>
+      {:else if usageState === 'error'}
+        <div class="text-xs text-[#B85C4A] truncate">{usageError}</div>
+      {:else if usageState === 'ready'}
+        <div class="flex flex-col gap-1 text-xs text-warm-text">
+          <div class="flex items-center justify-between">
+            <div class="text-warm-sub">CPU</div>
+            <div>{usageCpuPercent === null ? '—' : `${usageCpuPercent.toFixed(1)}%`}</div>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="text-warm-sub">Memory</div>
+            <div>{usageMemoryBytes === null ? '—' : formatBytes(usageMemoryBytes)}</div>
+          </div>
+          <div class="text-[11px] text-warm-muted">Refreshes every 5s</div>
+        </div>
+      {:else}
+        <div class="text-xs text-warm-muted">Idle</div>
+      {/if}
+    </div>
   </aside>
 </div>

@@ -9,6 +9,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::get_process_usage,
             commands::run_postgres_to_parquet,
             commands::run_mysql_to_parquet,
             commands::preview_postgres_schema,

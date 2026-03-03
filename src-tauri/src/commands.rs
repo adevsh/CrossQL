@@ -2,7 +2,11 @@ use crate::connectors::postgres::PostgresConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
+use crate::engine::schema::{apply_schema_maps, validate_no_nulls, SchemaMapConfig};
+use polars::prelude::IntoLazy;
 use std::fs;
+use std::sync::{Mutex, OnceLock};
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -56,10 +60,40 @@ pub struct SchemaField {
     dtype: String,
 }
 
+static SYSINFO: OnceLock<Mutex<System>> = OnceLock::new();
+
+#[derive(serde::Serialize)]
+pub struct ProcessUsage {
+    cpu_percent: f32,
+    memory_bytes: u64,
+}
+
+#[tauri::command]
+pub fn get_process_usage() -> Result<ProcessUsage, String> {
+    let pid = Pid::from_u32(std::process::id());
+    let sys = SYSINFO.get_or_init(|| Mutex::new(System::new_all()));
+    let mut sys = sys
+        .lock()
+        .map_err(|_| "Failed to lock process monitor".to_string())?;
+
+    let pids = [pid];
+    sys.refresh_processes(ProcessesToUpdate::Some(&pids), false);
+
+    let p = sys
+        .process(pid)
+        .ok_or_else(|| "Process not found".to_string())?;
+
+    Ok(ProcessUsage {
+        cpu_percent: p.cpu_usage(),
+        memory_bytes: p.memory(),
+    })
+}
+
 #[tauri::command]
 pub async fn run_postgres_to_parquet(
     source: PostgresConfig,
     output: ParquetConfig,
+    schema_maps: Option<Vec<SchemaMapConfig>>,
 ) -> Result<RunResult, String> {
     let df = PostgresConnector::fetch_dataframe(
         &source.host,
@@ -71,6 +105,16 @@ pub async fn run_postgres_to_parquet(
     )
     .await?;
 
+    let mut lf = df.lazy();
+    let mut error_on_null_cols: Vec<String> = Vec::new();
+    if let Some(schema_maps) = schema_maps.as_ref() {
+        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
+        lf = next;
+        error_on_null_cols = err_cols;
+    }
+
+    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
+    validate_no_nulls(&df, &error_on_null_cols)?;
     let row_count = df.height();
 
     crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
@@ -95,6 +139,7 @@ pub async fn run_postgres_to_parquet(
 pub async fn run_mysql_to_parquet(
     source: PostgresConfig,
     output: ParquetConfig,
+    schema_maps: Option<Vec<SchemaMapConfig>>,
 ) -> Result<RunResult, String> {
     let df = MysqlConnector::fetch_dataframe(
         &source.host,
@@ -106,6 +151,16 @@ pub async fn run_mysql_to_parquet(
     )
     .await?;
 
+    let mut lf = df.lazy();
+    let mut error_on_null_cols: Vec<String> = Vec::new();
+    if let Some(schema_maps) = schema_maps.as_ref() {
+        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
+        lf = next;
+        error_on_null_cols = err_cols;
+    }
+
+    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
+    validate_no_nulls(&df, &error_on_null_cols)?;
     let row_count = df.height();
 
     crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
@@ -166,6 +221,7 @@ pub async fn preview_mysql_schema(source: PostgresConfig) -> Result<Vec<SchemaFi
 pub async fn run_mongodb_to_parquet(
     source: MongoConfig,
     output: ParquetConfig,
+    schema_maps: Option<Vec<SchemaMapConfig>>,
 ) -> Result<RunResult, String> {
     let df = MongoConnector::fetch_dataframe(
         &source.uri,
@@ -177,6 +233,16 @@ pub async fn run_mongodb_to_parquet(
     )
     .await?;
 
+    let mut lf = df.lazy();
+    let mut error_on_null_cols: Vec<String> = Vec::new();
+    if let Some(schema_maps) = schema_maps.as_ref() {
+        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
+        lf = next;
+        error_on_null_cols = err_cols;
+    }
+
+    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
+    validate_no_nulls(&df, &error_on_null_cols)?;
     let row_count = df.height();
 
     crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
@@ -219,6 +285,7 @@ pub async fn preview_mongodb_schema(source: MongoConfig) -> Result<Vec<SchemaFie
 pub async fn run_cassandra_to_parquet(
     source: CassandraConfig,
     output: ParquetConfig,
+    schema_maps: Option<Vec<SchemaMapConfig>>,
 ) -> Result<RunResult, String> {
     let df = CassandraConnector::fetch_dataframe(
         &source.contact_points,
@@ -227,6 +294,16 @@ pub async fn run_cassandra_to_parquet(
     )
     .await?;
 
+    let mut lf = df.lazy();
+    let mut error_on_null_cols: Vec<String> = Vec::new();
+    if let Some(schema_maps) = schema_maps.as_ref() {
+        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
+        lf = next;
+        error_on_null_cols = err_cols;
+    }
+
+    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
+    validate_no_nulls(&df, &error_on_null_cols)?;
     let row_count = df.height();
 
     crate::writer::parquet::CrossQLParquetWriter::write_dataframe(

@@ -39,6 +39,7 @@ export type NodeConfig =
   | MongoConfig 
   | CassandraConfig 
   | JoinConfig 
+  | SchemaMapConfig
   | ParquetConfig 
   | Record<string, any>;
 
@@ -81,6 +82,16 @@ export interface JoinConfig {
   left_on: string;
   right_on: string;
   how: 'inner' | 'left' | 'outer' | 'cross';
+}
+
+export interface SchemaMapConfig {
+  columns: Array<{
+    source: string;
+    rename?: string;
+    cast?: '' | 'Int64' | 'Float64' | 'Boolean' | 'Utf8' | 'Datetime';
+    null_mode?: 'keep' | 'drop_row' | 'fill_default' | 'error';
+    fill_value?: string;
+  }>;
 }
 
 export interface ParquetConfig {

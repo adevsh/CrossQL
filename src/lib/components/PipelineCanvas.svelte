@@ -5,6 +5,7 @@
   import MySQLSourceNode from './nodes/MySQLSourceNode.svelte';
   import MongoSourceNode from './nodes/MongoSourceNode.svelte';
   import CassandraSourceNode from './nodes/CassandraSourceNode.svelte';
+  import SchemaMapNode from './nodes/SchemaMapNode.svelte';
   import OutputNode from './nodes/OutputNode.svelte';
 
   let { nodes = $bindable(), edges = $bindable(), selectedNodeId = $bindable<string | null>(null) } = $props();
@@ -14,6 +15,7 @@
     mysql: MySQLSourceNode,
     mongodb: MongoSourceNode,
     cassandra: CassandraSourceNode,
+    schema_map: SchemaMapNode,
     parquet: OutputNode
   };
 
@@ -29,6 +31,7 @@
     {nodeTypes}
     onselectionchange={onSelectionChange}
     fitView
+    fitViewOptions={{ padding: 0.6, maxZoom: 0.85 }}
     class="bg-warm-canvas"
   >
     <Background patternColor="#D9D0C0" gap={20} size={1} />
