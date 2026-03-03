@@ -96,7 +96,7 @@ pub fn get_process_usage() -> Result<ProcessUsage, String> {
 
 #[tauri::command]
 pub async fn run_pipeline(nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> Result<PipelineRunResult, String> {
-    PipelineEngine::run(nodes, edges).await
+    PipelineEngine::run(nodes, edges, true).await
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -126,7 +126,6 @@ pub async fn start_pipeline_run(
     let (run_id, entry) = run_manager.create_run().await;
     let run_id_clone = run_id.clone();
     let app_clone = app.clone();
-    let run_manager = run_manager.inner().clone();
     let entry_clone: Arc<RunEntry> = entry.clone();
 
     tauri::async_runtime::spawn(async move {
@@ -156,7 +155,7 @@ pub async fn start_pipeline_run(
             );
         }
 
-        let run_fut = PipelineEngine::run(nodes, edges);
+        let run_fut = PipelineEngine::run(nodes, edges, false);
         let outcome = tokio::select! {
             _ = entry_clone.cancel.cancelled() => Err("Cancelled".to_string()),
             res = run_fut => res,
@@ -222,8 +221,6 @@ pub async fn start_pipeline_run(
                 }
             }
         }
-
-        run_manager.finish_run(&run_id_clone).await;
     });
 
     Ok(run_id)

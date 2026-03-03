@@ -456,7 +456,11 @@ fn node_to_lazyframe<'a>(
 pub struct PipelineEngine;
 
 impl PipelineEngine {
-    pub async fn run(nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> Result<PipelineRunResult, String> {
+    pub async fn run(
+        nodes: Vec<FlowNode>,
+        edges: Vec<FlowEdge>,
+        compute_stats: bool,
+    ) -> Result<PipelineRunResult, String> {
         let mut nodes_by_id: HashMap<String, FlowNode> = HashMap::new();
         for n in nodes {
             nodes_by_id.insert(n.id.clone(), n);
@@ -511,32 +515,37 @@ impl PipelineEngine {
             .map_err(|e| format!("Failed to stat output file: {}", e))?
             .len();
 
-        let mut node_stats: Vec<NodeStats> = Vec::new();
-        for (id, lf) in cache.iter() {
-            let node = nodes_by_id.get(id);
-            if let Some(n) = node {
-                if n.node_type == "join" {
-                    let (left_id, right_id) = resolve_join_inputs(&edges, id)?;
-                    let rows_left = cache.get(&left_id).and_then(|x| compute_row_count(x).ok());
-                    let rows_right = cache.get(&right_id).and_then(|x| compute_row_count(x).ok());
-                    let rows_out = compute_row_count(lf).ok();
-                    node_stats.push(NodeStats {
-                        id: id.clone(),
-                        rows_left,
-                        rows_right,
-                        rows_out,
-                    });
-                    continue;
+        let node_stats: Vec<NodeStats> = if compute_stats {
+            let mut node_stats: Vec<NodeStats> = Vec::new();
+            for (id, lf) in cache.iter() {
+                let node = nodes_by_id.get(id);
+                if let Some(n) = node {
+                    if n.node_type == "join" {
+                        let (left_id, right_id) = resolve_join_inputs(&edges, id)?;
+                        let rows_left = cache.get(&left_id).and_then(|x| compute_row_count(x).ok());
+                        let rows_right = cache.get(&right_id).and_then(|x| compute_row_count(x).ok());
+                        let rows_out = compute_row_count(lf).ok();
+                        node_stats.push(NodeStats {
+                            id: id.clone(),
+                            rows_left,
+                            rows_right,
+                            rows_out,
+                        });
+                        continue;
+                    }
                 }
+                let rows_out = compute_row_count(lf).ok();
+                node_stats.push(NodeStats {
+                    id: id.clone(),
+                    rows_left: None,
+                    rows_right: None,
+                    rows_out,
+                });
             }
-            let rows_out = compute_row_count(lf).ok();
-            node_stats.push(NodeStats {
-                id: id.clone(),
-                rows_left: None,
-                rows_right: None,
-                rows_out,
-            });
-        }
+            node_stats
+        } else {
+            Vec::new()
+        };
 
         Ok(PipelineRunResult {
             row_count: output_row_count,
