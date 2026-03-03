@@ -14,6 +14,14 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::fs;
 use std::pin::Pin;
+use std::sync::Arc;
+
+/// Callback for per-node progress: (node_id, state) where state is "running" or "done".
+pub type NodeProgressFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+fn noop_progress() -> NodeProgressFn {
+    Arc::new(|_node_id: &str, _state: &str| {})
+}
 
 #[derive(serde::Deserialize)]
 pub struct FlowNodeData {
@@ -215,6 +223,7 @@ fn node_to_lazyframe<'a>(
     cache: &'a mut HashMap<String, LazyFrame>,
     visiting: &'a mut HashSet<String>,
     error_on_null_cols: &'a mut Vec<String>,
+    on_progress: &'a NodeProgressFn,
 ) -> Pin<Box<dyn Future<Output = Result<LazyFrame, String>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(lf) = cache.get(node_id) {
@@ -228,6 +237,7 @@ fn node_to_lazyframe<'a>(
             .get(node_id)
             .ok_or_else(|| format!("Node not found: {}", node_id))?;
         visiting.insert(node_id.to_string());
+        on_progress(node_id, "running");
 
         let lf = match node.node_type.as_str() {
         "postgres" => {
@@ -295,6 +305,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
 
@@ -318,6 +329,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let cfg: FilterConfig =
@@ -338,6 +350,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let cfg: SelectConfig =
@@ -358,6 +371,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let cfg: RenameConfig =
@@ -378,6 +392,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let cfg: CastConfig =
@@ -398,6 +413,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let cfg: DerivedColumnConfig =
@@ -420,6 +436,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
             let right_lf = node_to_lazyframe(
@@ -429,6 +446,7 @@ fn node_to_lazyframe<'a>(
                 cache,
                 visiting,
                 error_on_null_cols,
+                on_progress,
             )
             .await?;
 
@@ -449,6 +467,7 @@ fn node_to_lazyframe<'a>(
 
         visiting.remove(node_id);
         cache.insert(node_id.to_string(), lf.clone());
+        on_progress(node_id, "done");
         Ok(lf)
     })
 }

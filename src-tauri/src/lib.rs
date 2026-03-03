@@ -17,13 +17,9 @@ pub fn run() {
             commands::cancel_pipeline_run,
             commands::await_pipeline_run,
             commands::preview_pipeline_node,
-            commands::run_postgres_to_parquet,
-            commands::run_mysql_to_parquet,
             commands::preview_postgres_schema,
             commands::preview_mysql_schema,
-            commands::run_mongodb_to_parquet,
             commands::preview_mongodb_schema,
-            commands::run_cassandra_to_parquet,
             commands::preview_cassandra_schema
         ])
         .run(tauri::generate_context!())

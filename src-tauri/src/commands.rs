@@ -3,11 +3,8 @@ use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
 use crate::engine::pipeline::{FlowEdge, FlowNode, PipelineEngine, PipelineRunResult, PreviewResult};
-use crate::engine::schema::{apply_schema_maps, validate_no_nulls, SchemaMapConfig};
 use crate::run_manager::RunEntry;
 use crate::run_manager::RunManager;
-use polars::prelude::IntoLazy;
-use std::fs;
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -19,7 +16,7 @@ pub fn greet(name: &str) -> String {
 }
 
 #[derive(serde::Deserialize)]
-pub struct PostgresConfig {
+pub struct SqlSourceConfig {
     host: String,
     port: u16,
     user: String,
@@ -43,20 +40,6 @@ pub struct CassandraConfig {
     contact_points: String,
     keyspace: String,
     query: String,
-}
-
-#[derive(serde::Deserialize)]
-pub struct ParquetConfig {
-    path: String,
-    compression: String,
-    row_group_size: Option<usize>,
-}
-
-#[derive(serde::Serialize)]
-pub struct RunResult {
-    row_count: usize,
-    path: String,
-    file_size_bytes: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -257,99 +240,7 @@ pub async fn preview_pipeline_node(
 }
 
 #[tauri::command]
-pub async fn run_postgres_to_parquet(
-    source: PostgresConfig,
-    output: ParquetConfig,
-    schema_maps: Option<Vec<SchemaMapConfig>>,
-) -> Result<RunResult, String> {
-    let df = PostgresConnector::fetch_dataframe(
-        &source.host,
-        source.port,
-        &source.user,
-        &source.password,
-        &source.database,
-        &source.query,
-    )
-    .await?;
-
-    let mut lf = df.lazy();
-    let mut error_on_null_cols: Vec<String> = Vec::new();
-    if let Some(schema_maps) = schema_maps.as_ref() {
-        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
-        lf = next;
-        error_on_null_cols = err_cols;
-    }
-
-    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
-    validate_no_nulls(&df, &error_on_null_cols)?;
-    let row_count = df.height();
-
-    crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
-        df,
-        &output.path,
-        &output.compression,
-        output.row_group_size,
-    )?;
-
-    let file_size_bytes = fs::metadata(&output.path)
-        .map_err(|e| format!("Failed to stat output file: {}", e))?
-        .len();
-
-    Ok(RunResult {
-        row_count,
-        path: output.path,
-        file_size_bytes,
-    })
-}
-
-#[tauri::command]
-pub async fn run_mysql_to_parquet(
-    source: PostgresConfig,
-    output: ParquetConfig,
-    schema_maps: Option<Vec<SchemaMapConfig>>,
-) -> Result<RunResult, String> {
-    let df = MysqlConnector::fetch_dataframe(
-        &source.host,
-        source.port,
-        &source.user,
-        &source.password,
-        &source.database,
-        &source.query,
-    )
-    .await?;
-
-    let mut lf = df.lazy();
-    let mut error_on_null_cols: Vec<String> = Vec::new();
-    if let Some(schema_maps) = schema_maps.as_ref() {
-        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
-        lf = next;
-        error_on_null_cols = err_cols;
-    }
-
-    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
-    validate_no_nulls(&df, &error_on_null_cols)?;
-    let row_count = df.height();
-
-    crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
-        df,
-        &output.path,
-        &output.compression,
-        output.row_group_size,
-    )?;
-
-    let file_size_bytes = fs::metadata(&output.path)
-        .map_err(|e| format!("Failed to stat output file: {}", e))?
-        .len();
-
-    Ok(RunResult {
-        row_count,
-        path: output.path,
-        file_size_bytes,
-    })
-}
-
-#[tauri::command]
-pub async fn preview_postgres_schema(source: PostgresConfig) -> Result<Vec<SchemaField>, String> {
+pub async fn preview_postgres_schema(source: SqlSourceConfig) -> Result<Vec<SchemaField>, String> {
     let fields = PostgresConnector::describe_schema(
         &source.host,
         source.port,
@@ -367,7 +258,7 @@ pub async fn preview_postgres_schema(source: PostgresConfig) -> Result<Vec<Schem
 }
 
 #[tauri::command]
-pub async fn preview_mysql_schema(source: PostgresConfig) -> Result<Vec<SchemaField>, String> {
+pub async fn preview_mysql_schema(source: SqlSourceConfig) -> Result<Vec<SchemaField>, String> {
     let fields = MysqlConnector::describe_schema(
         &source.host,
         source.port,
@@ -382,52 +273,6 @@ pub async fn preview_mysql_schema(source: PostgresConfig) -> Result<Vec<SchemaFi
         .into_iter()
         .map(|(name, dtype)| SchemaField { name, dtype })
         .collect())
-}
-
-#[tauri::command]
-pub async fn run_mongodb_to_parquet(
-    source: MongoConfig,
-    output: ParquetConfig,
-    schema_maps: Option<Vec<SchemaMapConfig>>,
-) -> Result<RunResult, String> {
-    let df = MongoConnector::fetch_dataframe(
-        &source.uri,
-        &source.database,
-        &source.collection,
-        source.filter.as_deref().unwrap_or("{}"),
-        source.projection.as_deref().unwrap_or("{}"),
-        source.flatten_depth.unwrap_or(1),
-    )
-    .await?;
-
-    let mut lf = df.lazy();
-    let mut error_on_null_cols: Vec<String> = Vec::new();
-    if let Some(schema_maps) = schema_maps.as_ref() {
-        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
-        lf = next;
-        error_on_null_cols = err_cols;
-    }
-
-    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
-    validate_no_nulls(&df, &error_on_null_cols)?;
-    let row_count = df.height();
-
-    crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
-        df,
-        &output.path,
-        &output.compression,
-        output.row_group_size,
-    )?;
-
-    let file_size_bytes = fs::metadata(&output.path)
-        .map_err(|e| format!("Failed to stat output file: {}", e))?
-        .len();
-
-    Ok(RunResult {
-        row_count,
-        path: output.path,
-        file_size_bytes,
-    })
 }
 
 #[tauri::command]
@@ -446,49 +291,6 @@ pub async fn preview_mongodb_schema(source: MongoConfig) -> Result<Vec<SchemaFie
         .into_iter()
         .map(|(name, dtype)| SchemaField { name, dtype })
         .collect())
-}
-
-#[tauri::command]
-pub async fn run_cassandra_to_parquet(
-    source: CassandraConfig,
-    output: ParquetConfig,
-    schema_maps: Option<Vec<SchemaMapConfig>>,
-) -> Result<RunResult, String> {
-    let df = CassandraConnector::fetch_dataframe(
-        &source.contact_points,
-        &source.keyspace,
-        &source.query,
-    )
-    .await?;
-
-    let mut lf = df.lazy();
-    let mut error_on_null_cols: Vec<String> = Vec::new();
-    if let Some(schema_maps) = schema_maps.as_ref() {
-        let (next, err_cols) = apply_schema_maps(lf, schema_maps)?;
-        lf = next;
-        error_on_null_cols = err_cols;
-    }
-
-    let df = lf.collect().map_err(|e| format!("Failed to execute lazy pipeline: {}", e))?;
-    validate_no_nulls(&df, &error_on_null_cols)?;
-    let row_count = df.height();
-
-    crate::writer::parquet::CrossQLParquetWriter::write_dataframe(
-        df,
-        &output.path,
-        &output.compression,
-        output.row_group_size,
-    )?;
-
-    let file_size_bytes = fs::metadata(&output.path)
-        .map_err(|e| format!("Failed to stat output file: {}", e))?
-        .len();
-
-    Ok(RunResult {
-        row_count,
-        path: output.path,
-        file_size_bytes,
-    })
 }
 
 #[tauri::command]
