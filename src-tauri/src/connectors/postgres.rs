@@ -1,6 +1,6 @@
 use polars::prelude::{Column as PolarsColumn, *};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{Column, Row, TypeInfo};
+use sqlx::{Column, Executor, Row, TypeInfo};
 
 pub struct PostgresConnector;
 
@@ -122,5 +122,48 @@ impl PostgresConnector {
 
         let height = if columns.is_empty() { 0 } else { columns[0].len() };
         DataFrame::new(height, columns).map_err(|e| format!("Failed to create DataFrame: {}", e))
+    }
+
+    pub async fn describe_schema(
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+        database: &str,
+        query: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        let connect_options = PgConnectOptions::new()
+            .host(host)
+            .port(port)
+            .username(user)
+            .password(password)
+            .database(database);
+
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_with(connect_options)
+            .await
+            .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
+
+        let described = (&pool)
+            .describe(query)
+            .await
+            .map_err(|e| format!("Failed to describe query: {}", e))?;
+
+        let mut out = Vec::with_capacity(described.columns().len());
+        for c in described.columns() {
+            let sql_type = c.type_info().name().to_uppercase();
+            let polars_type = match sql_type.as_str() {
+                "INT2" | "INT4" | "INT8" => "Int64",
+                "FLOAT4" | "FLOAT8" | "NUMERIC" => "Float64",
+                "BOOL" => "Boolean",
+                "TIMESTAMP" | "TIMESTAMPTZ" | "DATE" | "TIME" => "Datetime",
+                "UUID" | "VARCHAR" | "TEXT" | "BPCHAR" => "Utf8",
+                _ => "Utf8",
+            };
+            out.push((c.name().to_string(), polars_type.to_string()));
+        }
+
+        Ok(out)
     }
 }

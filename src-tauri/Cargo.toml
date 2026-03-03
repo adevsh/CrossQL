@@ -1,8 +1,8 @@
 [package]
 name = "crossql"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "crossql"
+authors = ["adevshankar.com"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -31,6 +31,10 @@ polars = { version = "0.53.0", features = [
 sqlx = { version = "0.8", features = [
   "postgres", "mysql", "runtime-tokio", "tls-rustls", "chrono", "uuid"
 ] }
+
+mongodb = "3"
+futures-util = "0.3"
+cdrs-tokio = "9"
 
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"

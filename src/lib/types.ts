@@ -66,6 +66,7 @@ export interface MongoConfig {
   collection?: string;
   filter?: string; // JSON string
   projection?: string; // JSON string
+  flatten_depth?: number;
 }
 
 export interface CassandraConfig {
