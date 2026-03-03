@@ -2,6 +2,7 @@ use crate::connectors::postgres::PostgresConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
+use crate::engine::pipeline::{FlowEdge, FlowNode, PipelineEngine, PipelineRunResult, PreviewResult};
 use crate::engine::schema::{apply_schema_maps, validate_no_nulls, SchemaMapConfig};
 use polars::prelude::IntoLazy;
 use std::fs;
@@ -87,6 +88,20 @@ pub fn get_process_usage() -> Result<ProcessUsage, String> {
         cpu_percent: p.cpu_usage(),
         memory_bytes: p.memory(),
     })
+}
+
+#[tauri::command]
+pub async fn run_pipeline(nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> Result<PipelineRunResult, String> {
+    PipelineEngine::run(nodes, edges).await
+}
+
+#[tauri::command]
+pub async fn preview_pipeline_node(
+    nodes: Vec<FlowNode>,
+    edges: Vec<FlowEdge>,
+    node_id: String,
+) -> Result<PreviewResult, String> {
+    PipelineEngine::preview_node(nodes, edges, node_id).await
 }
 
 #[tauri::command]

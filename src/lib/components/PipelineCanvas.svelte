@@ -6,6 +6,7 @@
   import MongoSourceNode from './nodes/MongoSourceNode.svelte';
   import CassandraSourceNode from './nodes/CassandraSourceNode.svelte';
   import SchemaMapNode from './nodes/SchemaMapNode.svelte';
+  import JoinNode from './nodes/JoinNode.svelte';
   import OutputNode from './nodes/OutputNode.svelte';
 
   let { nodes = $bindable(), edges = $bindable(), selectedNodeId = $bindable<string | null>(null) } = $props();
@@ -16,6 +17,7 @@
     mongodb: MongoSourceNode,
     cassandra: CassandraSourceNode,
     schema_map: SchemaMapNode,
+    join: JoinNode,
     parquet: OutputNode
   };
 

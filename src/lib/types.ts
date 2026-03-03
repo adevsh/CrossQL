@@ -77,8 +77,8 @@ export interface CassandraConfig {
 }
 
 export interface JoinConfig {
-  left: string; // Node ID
-  right: string; // Node ID
+  left?: string; // Node ID
+  right?: string; // Node ID
   left_on: string;
   right_on: string;
   how: 'inner' | 'left' | 'outer' | 'cross';

@@ -15,6 +15,11 @@
   let schemaError = $state<string | null>(null);
   let schemaFields = $state<Array<{ name: string; dtype: string }>>([]);
 
+  let previewState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  let previewError = $state<string | null>(null);
+  let previewColumns = $state<string[]>([]);
+  let previewRows = $state<any[]>([]);
+
   let usageState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
   let usageError = $state<string | null>(null);
   let usageCpuPercent = $state<number | null>(null);
@@ -83,7 +88,7 @@
     return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
   }
 
-  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'schema_map' | 'parquet') {
+  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'schema_map' | 'join' | 'parquet') {
     const id = newId(type);
     const position = nextPosition();
 
@@ -185,6 +190,19 @@
       return;
     }
 
+    if (type === 'join') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { how: 'inner', left_on: 'id', right_on: 'id' } },
+          position: { x: 470, y: position.y }
+        }
+      ];
+      return;
+    }
+
     nodes = [
       ...nodes,
       {
@@ -205,9 +223,7 @@
     }
   ]);
 
-  let edges = $state<any[]>([
-    { id: 'e1', source: 'src1', target: 'out1' }
-  ]);
+  let edges = $state<any[]>([]);
 
   async function loadSchema() {
     schemaState = 'idle';
@@ -231,6 +247,34 @@
 
   $effect(() => {
     void loadSchema();
+  });
+
+  async function loadPreview() {
+    previewState = 'idle';
+    previewError = null;
+    previewColumns = [];
+    previewRows = [];
+
+    if (!selectedNodeId) return;
+    const node = nodes.find((n: any) => n.id === selectedNodeId);
+    if (!node) return;
+    if (node.type !== 'join') return;
+
+    previewState = 'loading';
+    try {
+      const result = await invoke('preview_pipeline_node', { nodes, edges, nodeId: selectedNodeId });
+      const r = result as any;
+      previewColumns = Array.isArray(r?.columns) ? r.columns : [];
+      previewRows = Array.isArray(r?.rows) ? r.rows : [];
+      previewState = 'ready';
+    } catch (e) {
+      previewState = 'error';
+      previewError = `${e}`;
+    }
+  }
+
+  $effect(() => {
+    void loadPreview();
   });
 
   function formatBytes(bytes: number) {
@@ -282,134 +326,96 @@
     }
 
     const outputNode = outputNodes[0];
-    const incomingEdges = edges.filter((e: any) => e.target === outputNode.id);
-    if (incomingEdges.length !== 1) {
-      runState = 'error';
-      invokeResult = "Error: Output node must have exactly one incoming edge";
-      return;
-    }
-
-    let cursorId = incomingEdges[0].source;
-    const schema_maps: any[] = [];
-    let sourceNode: any | null = null;
-    for (let depth = 0; depth < 20; depth += 1) {
-      const node = nodes.find((n: any) => n.id === cursorId);
-      if (!node) {
-        runState = 'error';
-        invokeResult = "Error: Output edge source node not found";
-        return;
-      }
-
-      if (node.type === 'schema_map') {
-        if (!node?.data?.config) {
-          runState = 'error';
-          invokeResult = "Error: Missing Schema Map node config";
-          return;
-        }
-        schema_maps.push(node.data.config);
-        const inc = edges.filter((e: any) => e.target === node.id);
-        if (inc.length !== 1) {
-          runState = 'error';
-          invokeResult = "Error: Schema Map must have exactly one incoming edge";
-          return;
-        }
-        cursorId = inc[0].source;
-        continue;
-      }
-
-      if (node.type === 'postgres' || node.type === 'mysql' || node.type === 'mongodb' || node.type === 'cassandra') {
-        sourceNode = node;
-        break;
-      }
-
-      runState = 'error';
-      invokeResult = "Error: Output must be connected from a source (optionally via Schema Map)";
-      return;
-    }
-
-    if (!sourceNode) {
-      runState = 'error';
-      invokeResult = "Error: Unable to resolve pipeline source";
-      return;
-    }
-
-    if (!sourceNode?.data?.config) {
-      runState = 'error';
-      invokeResult = "Error: Missing source node config";
-      return;
-    }
-
     if (!outputNode?.data?.config) {
       runState = 'error';
       invokeResult = "Error: Missing output node config";
       return;
     }
 
-    const source = sourceNode.data.config as any;
     const output = outputNode.data.config as any;
 
-    if (sourceNode.type === 'mongodb') {
-      if (!source.uri) {
+    for (const n of nodes) {
+      if (n.type !== 'postgres' && n.type !== 'mysql' && n.type !== 'mongodb' && n.type !== 'cassandra' && n.type !== 'join') continue;
+      if (!n?.data?.config) {
         runState = 'error';
-        invokeResult = "Error: MongoDB 'uri' is required";
+        invokeResult = `Error: Missing config for node ${n.id}`;
         return;
       }
-      if (!source.database) {
-        runState = 'error';
-        invokeResult = "Error: MongoDB 'database' is required";
-        return;
-      }
-      if (!source.collection) {
-        runState = 'error';
-        invokeResult = "Error: MongoDB 'collection' is required";
-        return;
-      }
-    } else if (sourceNode.type === 'cassandra') {
-      if (!source.contact_points) {
-        runState = 'error';
-        invokeResult = "Error: Cassandra 'contact_points' is required";
-        return;
-      }
-      if (!source.keyspace) {
-        runState = 'error';
-        invokeResult = "Error: Cassandra 'keyspace' is required";
-        return;
-      }
-      if (!source.query) {
-        runState = 'error';
-        invokeResult = "Error: Cassandra 'query' is required";
-        return;
-      }
-    } else {
-      if (!source.host) {
-        runState = 'error';
-        invokeResult = "Error: Source 'host' is required";
-        return;
-      }
-      if (!source.port) {
-        runState = 'error';
-        invokeResult = "Error: Source 'port' is required";
-        return;
-      }
-      if (!source.user) {
-        runState = 'error';
-        invokeResult = "Error: Source 'user' is required";
-        return;
-      }
-      if (source.password === undefined || source.password === null) {
-        runState = 'error';
-        invokeResult = "Error: Source 'password' is required";
-        return;
-      }
-      if (!source.database) {
-        runState = 'error';
-        invokeResult = "Error: Source 'database' is required";
-        return;
-      }
-      if (!source.query) {
-        runState = 'error';
-        invokeResult = "Error: Source 'query' is required";
-        return;
+
+      const cfg = n.data.config as any;
+
+      if (n.type === 'mongodb') {
+        if (!cfg.uri) {
+          runState = 'error';
+          invokeResult = "Error: MongoDB 'uri' is required";
+          return;
+        }
+        if (!cfg.database) {
+          runState = 'error';
+          invokeResult = "Error: MongoDB 'database' is required";
+          return;
+        }
+        if (!cfg.collection) {
+          runState = 'error';
+          invokeResult = "Error: MongoDB 'collection' is required";
+          return;
+        }
+      } else if (n.type === 'cassandra') {
+        if (!cfg.contact_points) {
+          runState = 'error';
+          invokeResult = "Error: Cassandra 'contact_points' is required";
+          return;
+        }
+        if (!cfg.keyspace) {
+          runState = 'error';
+          invokeResult = "Error: Cassandra 'keyspace' is required";
+          return;
+        }
+        if (!cfg.query) {
+          runState = 'error';
+          invokeResult = "Error: Cassandra 'query' is required";
+          return;
+        }
+      } else if (n.type === 'join') {
+        const how = typeof cfg.how === 'string' ? cfg.how : 'inner';
+        if (how !== 'cross') {
+          if (!cfg.left_on || !cfg.right_on) {
+            runState = 'error';
+            invokeResult = "Error: Join requires left_on and right_on";
+            return;
+          }
+        }
+      } else {
+        if (!cfg.host) {
+          runState = 'error';
+          invokeResult = "Error: Source 'host' is required";
+          return;
+        }
+        if (!cfg.port) {
+          runState = 'error';
+          invokeResult = "Error: Source 'port' is required";
+          return;
+        }
+        if (!cfg.user) {
+          runState = 'error';
+          invokeResult = "Error: Source 'user' is required";
+          return;
+        }
+        if (cfg.password === undefined || cfg.password === null) {
+          runState = 'error';
+          invokeResult = "Error: Source 'password' is required";
+          return;
+        }
+        if (!cfg.database) {
+          runState = 'error';
+          invokeResult = "Error: Source 'database' is required";
+          return;
+        }
+        if (!cfg.query) {
+          runState = 'error';
+          invokeResult = "Error: Source 'query' is required";
+          return;
+        }
       }
     }
 
@@ -421,22 +427,20 @@
 
     invokeResult = "Running pipeline...";
     try {
-      const command =
-        sourceNode.type === 'postgres'
-          ? 'run_postgres_to_parquet'
-          : sourceNode.type === 'mysql'
-            ? 'run_mysql_to_parquet'
-            : sourceNode.type === 'mongodb'
-              ? 'run_mongodb_to_parquet'
-              : 'run_cassandra_to_parquet';
-      const schemaMapsOrdered = schema_maps.reverse();
-      const payload: any = { source, output };
-      if (schemaMapsOrdered.length > 0) payload.schema_maps = schemaMapsOrdered;
-      const result = await invoke(command, payload);
+      const result = await invoke('run_pipeline', { nodes, edges });
       const r = result as any;
       runRowCount = typeof r?.row_count === 'number' ? r.row_count : null;
       runFileSizeBytes = typeof r?.file_size_bytes === 'number' ? r.file_size_bytes : null;
       runOutputPath = typeof r?.path === 'string' ? r.path : null;
+
+      const stats = Array.isArray(r?.node_stats) ? r.node_stats : [];
+      const statsMap = new Map<string, any>(stats.map((s: any) => [s.id, s]));
+      nodes = nodes.map((n: any) => {
+        const s = statsMap.get(n.id);
+        if (!s) return n;
+        return { ...n, data: { ...(n.data ?? {}), stats: { rows_left: s.rows_left, rows_right: s.rows_right, rows_out: s.rows_out } } };
+      });
+
       runState = 'success';
       if (runRowCount !== null && runFileSizeBytes !== null && runOutputPath) {
         invokeResult = `Success: ${runRowCount} rows → ${runOutputPath} (${formatBytes(runFileSizeBytes)})`;
@@ -518,6 +522,14 @@
             <span class="flex items-center gap-2"><span>🔀</span><span>Schema Map</span></span>
             <span class="text-warm-muted text-xs">Add</span>
           </button>
+          <button
+            type="button"
+            onclick={() => addNode('join')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>⋈</span><span>Join</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
         </div>
       </div>
     </div>
@@ -581,6 +593,42 @@
               {/if}
             {:else}
               <div class="text-xs text-warm-muted">Select a source node to preview schema</div>
+            {/if}
+          {:else if selectedNode.type === 'join'}
+            <div class="text-xs text-warm-sub mb-2">Preview (first 50 rows)</div>
+            {#if previewState === 'loading'}
+              <div class="text-xs text-warm-muted">Loading…</div>
+            {:else if previewState === 'error'}
+              <div class="text-xs text-[#B85C4A]">{previewError}</div>
+            {:else if previewState === 'ready'}
+              {#if previewColumns.length === 0}
+                <div class="text-xs text-warm-muted">No columns</div>
+              {:else}
+                <div class="border border-warm-border rounded overflow-auto">
+                  <table class="w-full text-xs">
+                    <thead class="bg-warm-bg sticky top-0">
+                      <tr>
+                        {#each previewColumns as c (c)}
+                          <th class="text-left px-2 py-1 border-b border-warm-border font-semibold text-warm-sub whitespace-nowrap">{c}</th>
+                        {/each}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each previewRows as r, i (i)}
+                        <tr class="odd:bg-white even:bg-warm-panel/40">
+                          {#each previewColumns as c (c)}
+                            <td class="px-2 py-1 border-b border-warm-border text-warm-text whitespace-nowrap">
+                              {r?.[c] === null || r?.[c] === undefined ? '—' : `${r[c]}`}
+                            </td>
+                          {/each}
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            {:else}
+              <div class="text-xs text-warm-muted">Select a Join node to preview</div>
             {/if}
           {:else}
             <div class="text-xs text-warm-muted">No schema preview for this node type</div>

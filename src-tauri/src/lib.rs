@@ -10,6 +10,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::get_process_usage,
+            commands::run_pipeline,
+            commands::preview_pipeline_node,
             commands::run_postgres_to_parquet,
             commands::run_mysql_to_parquet,
             commands::preview_postgres_schema,
