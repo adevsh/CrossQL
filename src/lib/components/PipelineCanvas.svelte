@@ -1,24 +1,22 @@
 <script lang="ts">
   import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import PostgresSourceNode from './nodes/PostgresSourceNode.svelte';
+  import OutputNode from './nodes/OutputNode.svelte';
 
-  // Temporary initial state for Phase 1 verification
-  let nodes = $state([
-    {
-      id: '1',
-      type: 'input',
-      data: { label: 'Start Phase 1' },
-      position: { x: 250, y: 25 },
-      style: "background: #FFFFFF; border: 1px solid #DDD5C8; color: #2C2416; width: 180px;"
-    },
-  ]);
-  let edges = $state([]);
+  let { nodes = $bindable(), edges = $bindable() } = $props();
+
+  const nodeTypes = {
+    postgres: PostgresSourceNode,
+    parquet: OutputNode
+  };
 </script>
 
 <div class="h-full w-full bg-warm-canvas">
   <SvelteFlow 
     bind:nodes 
     bind:edges 
+    {nodeTypes}
     fitView
     class="bg-warm-canvas"
   >
