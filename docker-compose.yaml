@@ -1,0 +1,20 @@
+services:
+  # MySQL 8.0 Database
+  # Placeholder for other databases
+  # mysql:
+  # postgresql:
+  # mongodb:
+  # cassandra:
+volumes:
+  mysql_data:
+    driver: local
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  cassandra_data:
+    driver: local
+
+networks:
+  crossql-network:
+    driver: bridge
