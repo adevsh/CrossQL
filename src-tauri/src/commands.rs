@@ -4,10 +4,14 @@ use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
 use crate::engine::pipeline::{FlowEdge, FlowNode, PipelineEngine, PipelineRunResult, PreviewResult};
 use crate::engine::schema::{apply_schema_maps, validate_no_nulls, SchemaMapConfig};
+use crate::run_manager::RunEntry;
+use crate::run_manager::RunManager;
 use polars::prelude::IntoLazy;
 use std::fs;
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use sysinfo::{Pid, ProcessesToUpdate, System};
+use tauri::Emitter;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -93,6 +97,157 @@ pub fn get_process_usage() -> Result<ProcessUsage, String> {
 #[tauri::command]
 pub async fn run_pipeline(nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> Result<PipelineRunResult, String> {
     PipelineEngine::run(nodes, edges).await
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct PipelineEvent {
+    run_id: String,
+    kind: String,
+    node_id: Option<String>,
+    state: Option<String>,
+    message: Option<String>,
+    result: Option<serde_json::Value>,
+}
+
+fn emit_pipeline_event(app: &tauri::AppHandle, evt: PipelineEvent) {
+    if let Err(e) = app.emit("pipeline_event", evt) {
+        eprintln!("failed to emit pipeline_event: {}", e);
+    }
+}
+
+#[tauri::command]
+pub async fn start_pipeline_run(
+    app: tauri::AppHandle,
+    run_manager: tauri::State<'_, Arc<RunManager>>,
+    nodes: Vec<FlowNode>,
+    edges: Vec<FlowEdge>,
+) -> Result<String, String> {
+    let node_ids: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
+    let (run_id, entry) = run_manager.create_run().await;
+    let run_id_clone = run_id.clone();
+    let app_clone = app.clone();
+    let run_manager = run_manager.inner().clone();
+    let entry_clone: Arc<RunEntry> = entry.clone();
+
+    tauri::async_runtime::spawn(async move {
+        emit_pipeline_event(
+            &app_clone,
+            PipelineEvent {
+                run_id: run_id_clone.clone(),
+                kind: "run_started".to_string(),
+                node_id: None,
+                state: None,
+                message: None,
+                result: None,
+            },
+        );
+
+        for id in &node_ids {
+            emit_pipeline_event(
+                &app_clone,
+                PipelineEvent {
+                    run_id: run_id_clone.clone(),
+                    kind: "node_state".to_string(),
+                    node_id: Some(id.clone()),
+                    state: Some("running".to_string()),
+                    message: None,
+                    result: None,
+                },
+            );
+        }
+
+        let run_fut = PipelineEngine::run(nodes, edges);
+        let outcome = tokio::select! {
+            _ = entry_clone.cancel.cancelled() => Err("Cancelled".to_string()),
+            res = run_fut => res,
+        };
+
+        match outcome {
+            Ok(result) => {
+                let payload = serde_json::to_value(&result).ok();
+                let _ = entry_clone
+                    .set_result(payload.clone().ok_or_else(|| "Failed to serialize result".to_string()))
+                    .await;
+                emit_pipeline_event(
+                    &app_clone,
+                    PipelineEvent {
+                        run_id: run_id_clone.clone(),
+                        kind: "run_finished".to_string(),
+                        node_id: None,
+                        state: None,
+                        message: None,
+                        result: payload,
+                    },
+                );
+                for id in &node_ids {
+                    emit_pipeline_event(
+                        &app_clone,
+                        PipelineEvent {
+                            run_id: run_id_clone.clone(),
+                            kind: "node_state".to_string(),
+                            node_id: Some(id.clone()),
+                            state: Some("done".to_string()),
+                            message: None,
+                            result: None,
+                        },
+                    );
+                }
+            }
+            Err(err) => {
+                let kind = if err == "Cancelled" { "run_cancelled" } else { "run_error" };
+                entry_clone.set_result(Err(err.clone())).await;
+                emit_pipeline_event(
+                    &app_clone,
+                    PipelineEvent {
+                        run_id: run_id_clone.clone(),
+                        kind: kind.to_string(),
+                        node_id: None,
+                        state: None,
+                        message: Some(err.clone()),
+                        result: None,
+                    },
+                );
+                for id in &node_ids {
+                    emit_pipeline_event(
+                        &app_clone,
+                        PipelineEvent {
+                            run_id: run_id_clone.clone(),
+                            kind: "node_state".to_string(),
+                            node_id: Some(id.clone()),
+                            state: Some("error".to_string()),
+                            message: Some(err.clone()),
+                            result: None,
+                        },
+                    );
+                }
+            }
+        }
+
+        run_manager.finish_run(&run_id_clone).await;
+    });
+
+    Ok(run_id)
+}
+
+#[tauri::command]
+pub async fn await_pipeline_run(
+    run_manager: tauri::State<'_, Arc<RunManager>>,
+    runId: String,
+) -> Result<serde_json::Value, String> {
+    run_manager.await_run(&runId).await
+}
+
+#[tauri::command]
+pub async fn cancel_pipeline_run(
+    run_manager: tauri::State<'_, Arc<RunManager>>,
+    runId: String,
+) -> Result<(), String> {
+    let ok = run_manager.cancel_run(&runId).await;
+    if ok {
+        Ok(())
+    } else {
+        Err("Run not found".to_string())
+    }
 }
 
 #[tauri::command]

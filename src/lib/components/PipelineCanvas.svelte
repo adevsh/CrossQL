@@ -7,6 +7,11 @@
   import CassandraSourceNode from './nodes/CassandraSourceNode.svelte';
   import SchemaMapNode from './nodes/SchemaMapNode.svelte';
   import JoinNode from './nodes/JoinNode.svelte';
+  import FilterNode from './nodes/FilterNode.svelte';
+  import SelectNode from './nodes/SelectNode.svelte';
+  import RenameNode from './nodes/RenameNode.svelte';
+  import CastNode from './nodes/CastNode.svelte';
+  import DerivedColumnNode from './nodes/DerivedColumnNode.svelte';
   import OutputNode from './nodes/OutputNode.svelte';
 
   let { nodes = $bindable(), edges = $bindable(), selectedNodeId = $bindable<string | null>(null) } = $props();
@@ -18,6 +23,11 @@
     cassandra: CassandraSourceNode,
     schema_map: SchemaMapNode,
     join: JoinNode,
+    filter: FilterNode,
+    select: SelectNode,
+    rename: RenameNode,
+    cast: CastNode,
+    derived: DerivedColumnNode,
     parquet: OutputNode
   };
 

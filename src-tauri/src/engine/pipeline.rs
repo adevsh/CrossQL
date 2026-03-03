@@ -3,6 +3,9 @@ use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::postgres::PostgresConnector;
 use crate::engine::schema::{apply_schema_maps, validate_no_nulls, SchemaMapConfig};
+use crate::engine::transform::{
+    CastConfig, DerivedColumnConfig, FilterConfig, RenameConfig, SelectConfig, Transformer,
+};
 use crate::writer::parquet::CrossQLParquetWriter;
 use polars::lazy::prelude::*;
 use polars::prelude::IntoLazy;
@@ -154,7 +157,6 @@ fn parse_join_type(how: &str) -> Result<JoinType, String> {
         "inner" => Ok(JoinType::Inner),
         "left" => Ok(JoinType::Left),
         "outer" => Ok(JoinType::Full),
-        "cross" => Ok(JoinType::Cross),
         _ => Err(format!("Unsupported join type: {}", how)),
     }
 }
@@ -303,6 +305,106 @@ fn node_to_lazyframe<'a>(
             error_on_null_cols.extend(err_cols);
             lf
         }
+        "filter" => {
+            let inc = incoming_edges(edges, &node.id);
+            if inc.len() != 1 {
+                return Err("Filter must have exactly one incoming edge".to_string());
+            }
+            let upstream = &inc[0].source;
+            let upstream_lf = node_to_lazyframe(
+                upstream,
+                nodes_by_id,
+                edges,
+                cache,
+                visiting,
+                error_on_null_cols,
+            )
+            .await?;
+            let cfg: FilterConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid filter config: {}", e))?;
+            Transformer::apply_filter(upstream_lf, cfg)?
+        }
+        "select" => {
+            let inc = incoming_edges(edges, &node.id);
+            if inc.len() != 1 {
+                return Err("Select must have exactly one incoming edge".to_string());
+            }
+            let upstream = &inc[0].source;
+            let upstream_lf = node_to_lazyframe(
+                upstream,
+                nodes_by_id,
+                edges,
+                cache,
+                visiting,
+                error_on_null_cols,
+            )
+            .await?;
+            let cfg: SelectConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid select config: {}", e))?;
+            Transformer::apply_select(upstream_lf, cfg)?
+        }
+        "rename" => {
+            let inc = incoming_edges(edges, &node.id);
+            if inc.len() != 1 {
+                return Err("Rename must have exactly one incoming edge".to_string());
+            }
+            let upstream = &inc[0].source;
+            let upstream_lf = node_to_lazyframe(
+                upstream,
+                nodes_by_id,
+                edges,
+                cache,
+                visiting,
+                error_on_null_cols,
+            )
+            .await?;
+            let cfg: RenameConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid rename config: {}", e))?;
+            Transformer::apply_rename(upstream_lf, cfg)?
+        }
+        "cast" => {
+            let inc = incoming_edges(edges, &node.id);
+            if inc.len() != 1 {
+                return Err("Cast must have exactly one incoming edge".to_string());
+            }
+            let upstream = &inc[0].source;
+            let upstream_lf = node_to_lazyframe(
+                upstream,
+                nodes_by_id,
+                edges,
+                cache,
+                visiting,
+                error_on_null_cols,
+            )
+            .await?;
+            let cfg: CastConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid cast config: {}", e))?;
+            Transformer::apply_cast(upstream_lf, cfg)?
+        }
+        "derived" => {
+            let inc = incoming_edges(edges, &node.id);
+            if inc.len() != 1 {
+                return Err("Derived must have exactly one incoming edge".to_string());
+            }
+            let upstream = &inc[0].source;
+            let upstream_lf = node_to_lazyframe(
+                upstream,
+                nodes_by_id,
+                edges,
+                cache,
+                visiting,
+                error_on_null_cols,
+            )
+            .await?;
+            let cfg: DerivedColumnConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid derived config: {}", e))?;
+            Transformer::apply_derived(upstream_lf, cfg)?
+        }
         "join" => {
             let cfg: JoinConfig =
                 serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
@@ -330,21 +432,17 @@ fn node_to_lazyframe<'a>(
             )
             .await?;
 
-            if join_type == JoinType::Cross {
-                left_lf.join(right_lf, [], [], JoinArgs::new(join_type))
-            } else {
-                let left_on = cfg.left_on.unwrap_or_default();
-                let right_on = cfg.right_on.unwrap_or_default();
-                if left_on.trim().is_empty() || right_on.trim().is_empty() {
-                    return Err("Join requires left_on and right_on".to_string());
-                }
-                left_lf.join(
-                    right_lf,
-                    [col(left_on.trim())],
-                    [col(right_on.trim())],
-                    JoinArgs::new(join_type),
-                )
+            let left_on = cfg.left_on.unwrap_or_default();
+            let right_on = cfg.right_on.unwrap_or_default();
+            if left_on.trim().is_empty() || right_on.trim().is_empty() {
+                return Err("Join requires left_on and right_on".to_string());
             }
+            left_lf.join(
+                right_lf,
+                [col(left_on.trim())],
+                [col(right_on.trim())],
+                JoinArgs::new(join_type),
+            )
         }
         _ => return Err(format!("Unsupported node type: {}", node.node_type)),
         };
@@ -495,21 +593,17 @@ impl PipelineEngine {
             .await?
             .limit(200);
 
-            if join_type == JoinType::Cross {
-                left_lf.join(right_lf, [], [], JoinArgs::new(join_type))
-            } else {
-                let left_on = cfg.left_on.unwrap_or_default();
-                let right_on = cfg.right_on.unwrap_or_default();
-                if left_on.trim().is_empty() || right_on.trim().is_empty() {
-                    return Err("Join requires left_on and right_on".to_string());
-                }
-                left_lf.join(
-                    right_lf,
-                    [col(left_on.trim())],
-                    [col(right_on.trim())],
-                    JoinArgs::new(join_type),
-                )
+            let left_on = cfg.left_on.unwrap_or_default();
+            let right_on = cfg.right_on.unwrap_or_default();
+            if left_on.trim().is_empty() || right_on.trim().is_empty() {
+                return Err("Join requires left_on and right_on".to_string());
             }
+            left_lf.join(
+                right_lf,
+                [col(left_on.trim())],
+                [col(right_on.trim())],
+                JoinArgs::new(join_type),
+            )
         } else {
             node_to_lazyframe(
                 &node_id,

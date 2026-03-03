@@ -40,6 +40,11 @@ export type NodeConfig =
   | CassandraConfig 
   | JoinConfig 
   | SchemaMapConfig
+  | FilterConfig
+  | SelectConfig
+  | RenameConfig
+  | CastConfig
+  | DerivedColumnConfig
   | ParquetConfig 
   | Record<string, any>;
 
@@ -81,7 +86,7 @@ export interface JoinConfig {
   right?: string; // Node ID
   left_on: string;
   right_on: string;
-  how: 'inner' | 'left' | 'outer' | 'cross';
+  how: 'inner' | 'left' | 'outer';
 }
 
 export interface SchemaMapConfig {
@@ -92,6 +97,33 @@ export interface SchemaMapConfig {
     null_mode?: 'keep' | 'drop_row' | 'fill_default' | 'error';
     fill_value?: string;
   }>;
+}
+
+export interface FilterConfig {
+  column: string;
+  op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'is_null' | 'is_not_null';
+  value_type: 'string' | 'number' | 'boolean';
+  value: string;
+}
+
+export interface SelectConfig {
+  columns: string[];
+}
+
+export interface RenameConfig {
+  mappings: Array<{ from: string; to: string }>;
+}
+
+export interface CastConfig {
+  casts: Array<{ column: string; dtype: 'Int64' | 'Float64' | 'Boolean' | 'Utf8' | 'Datetime' }>;
+}
+
+export interface DerivedColumnConfig {
+  name: string;
+  op: 'upper' | 'lower' | 'add' | 'concat';
+  left: string;
+  right_kind: 'column' | 'literal';
+  right: string;
 }
 
 export interface ParquetConfig {

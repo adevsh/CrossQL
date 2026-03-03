@@ -2,6 +2,8 @@
   import PipelineCanvas from '$lib/components/PipelineCanvas.svelte';
   import TypeBadge from '$lib/components/TypeBadge.svelte';
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount } from 'svelte';
 
   let invokeResult = $state("Idle");
 
@@ -9,6 +11,113 @@
   let runRowCount = $state<number | null>(null);
   let runFileSizeBytes = $state<number | null>(null);
   let runOutputPath = $state<string | null>(null);
+  let runId = $state<string | null>(null);
+  let runLogs = $state<Array<{ ts: number; message: string }>>([]);
+
+  type PipelineEvent = {
+    run_id: string;
+    kind: string;
+    node_id?: string | null;
+    state?: string | null;
+    message?: string | null;
+    result?: any | null;
+  };
+
+  function appendLog(message: string) {
+    runLogs = [...runLogs, { ts: Date.now(), message }].slice(-300);
+  }
+
+  function updateNodeData(nodeId: string, nextData: any) {
+    nodes = nodes.map((n: any) =>
+      n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), ...nextData } } : n
+    );
+  }
+
+  function setAllNodeRunState(state: 'idle' | 'running' | 'done' | 'error', error?: string) {
+    nodes = nodes.map((n: any) => ({
+      ...n,
+      data: { ...(n.data ?? {}), run_state: state, run_error: error ?? null }
+    }));
+  }
+
+  function applyNodeStats(nodeStats: any[]) {
+    nodes = nodes.map((n: any) => {
+      const st = nodeStats.find((x: any) => x.id === n.id);
+      if (!st) return n;
+      return { ...n, data: { ...(n.data ?? {}), stats: { rows_left: st.rows_left, rows_right: st.rows_right, rows_out: st.rows_out } } };
+    });
+  }
+
+  onMount(() => {
+    const unlistenPromise = listen<PipelineEvent>('pipeline_event', (event) => {
+      const p = event.payload;
+      if (!p) return;
+
+      if (p.kind === 'run_started') {
+        runId = p.run_id;
+        runState = 'running';
+        invokeResult = 'Running…';
+        runRowCount = null;
+        runFileSizeBytes = null;
+        runOutputPath = null;
+        runLogs = [];
+        setAllNodeRunState('running');
+        appendLog('Run started');
+        return;
+      }
+
+      if (runId && p.run_id !== runId) return;
+
+      if (p.kind === 'node_state' && p.node_id) {
+        updateNodeData(p.node_id, { run_state: p.state ?? 'idle', run_error: p.message ?? null });
+        if (p.state) appendLog(`${p.node_id}: ${p.state}`);
+        return;
+      }
+
+      if (p.kind === 'run_finished' && p.result) {
+        runState = 'success';
+        if (typeof p.result?.row_count === 'number' && typeof p.result?.file_size_bytes === 'number' && typeof p.result?.path === 'string') {
+          const rowCount = p.result.row_count as number;
+          const fileSizeBytes = p.result.file_size_bytes as number;
+          const outPath = p.result.path as string;
+          runRowCount = rowCount;
+          runFileSizeBytes = fileSizeBytes;
+          runOutputPath = outPath;
+          invokeResult = `Success: ${rowCount} rows → ${outPath} (${formatBytes(fileSizeBytes)})`;
+        } else {
+          invokeResult = 'Success';
+        }
+        if (Array.isArray(p.result.node_stats)) {
+          applyNodeStats(p.result.node_stats);
+        }
+        setAllNodeRunState('done');
+        appendLog('Run finished');
+        runId = null;
+        return;
+      }
+
+      if (p.kind === 'run_cancelled') {
+        runState = 'idle';
+        invokeResult = 'Cancelled';
+        setAllNodeRunState('idle');
+        appendLog('Run cancelled');
+        runId = null;
+        return;
+      }
+
+      if (p.kind === 'run_error') {
+        runState = 'error';
+        invokeResult = `Error: ${p.message ?? 'Unknown error'}`;
+        setAllNodeRunState('error', p.message ?? 'Unknown error');
+        appendLog(`Error: ${p.message ?? 'Unknown error'}`);
+        runId = null;
+      }
+    });
+
+    return () => {
+      unlistenPromise.then((u) => u());
+    };
+  });
 
   let selectedNodeId = $state<string | null>(null);
   let schemaState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -88,7 +197,7 @@
     return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
   }
 
-  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'schema_map' | 'join' | 'parquet') {
+  function addNode(type: 'postgres' | 'mysql' | 'mongodb' | 'cassandra' | 'schema_map' | 'join' | 'filter' | 'select' | 'rename' | 'cast' | 'derived' | 'parquet') {
     const id = newId(type);
     const position = nextPosition();
 
@@ -203,6 +312,71 @@
       return;
     }
 
+    if (type === 'filter') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { column: '', op: 'eq', value_type: 'string', value: '' } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
+    if (type === 'select') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { columns: [] } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
+    if (type === 'rename') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { mappings: [] } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
+    if (type === 'cast') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { casts: [] } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
+    if (type === 'derived') {
+      nodes = [
+        ...nodes,
+        {
+          id,
+          type,
+          data: { config: { name: 'derived', op: 'upper', left: '', right_kind: 'column', right: '' } },
+          position: { x: 360, y: position.y }
+        }
+      ];
+      return;
+    }
+
     nodes = [
       ...nodes,
       {
@@ -312,6 +486,48 @@
     return () => clearInterval(id);
   });
 
+  async function cancelRun() {
+    if (!runId) return;
+    invokeResult = 'Cancelling…';
+    try {
+      await invoke('cancel_pipeline_run', { runId });
+      appendLog('Cancel requested');
+    } catch (e: any) {
+      runState = 'error';
+      invokeResult = `Error: ${e?.toString?.() ?? e}`;
+    }
+  }
+
+  async function waitForRun(id: string) {
+    try {
+      const result = await invoke('await_pipeline_run', { runId: id });
+      if (runId !== id) return;
+      const r = result as any;
+      runState = 'success';
+      if (typeof r?.row_count === 'number' && typeof r?.file_size_bytes === 'number' && typeof r?.path === 'string') {
+        runRowCount = r.row_count;
+        runFileSizeBytes = r.file_size_bytes;
+        runOutputPath = r.path;
+        invokeResult = `Success: ${r.row_count} rows → ${r.path} (${formatBytes(r.file_size_bytes)})`;
+      } else {
+        invokeResult = 'Success';
+      }
+      if (Array.isArray(r?.node_stats)) {
+        applyNodeStats(r.node_stats);
+      }
+      setAllNodeRunState('done');
+      appendLog('Run finished');
+      runId = null;
+    } catch (e: any) {
+      if (runId !== id) return;
+      runState = 'error';
+      invokeResult = `Error: ${e?.toString?.() ?? e}`;
+      setAllNodeRunState('error', e?.toString?.() ?? `${e}`);
+      appendLog(`Error: ${e?.toString?.() ?? e}`);
+      runId = null;
+    }
+  }
+
   async function testInvoke() {
     runState = 'running';
     runRowCount = null;
@@ -377,13 +593,10 @@
           return;
         }
       } else if (n.type === 'join') {
-        const how = typeof cfg.how === 'string' ? cfg.how : 'inner';
-        if (how !== 'cross') {
-          if (!cfg.left_on || !cfg.right_on) {
-            runState = 'error';
-            invokeResult = "Error: Join requires left_on and right_on";
-            return;
-          }
+        if (!cfg.left_on || !cfg.right_on) {
+          runState = 'error';
+          invokeResult = "Error: Join requires left_on and right_on";
+          return;
         }
       } else {
         if (!cfg.host) {
@@ -425,28 +638,16 @@
       return;
     }
 
-    invokeResult = "Running pipeline...";
+    setAllNodeRunState('running');
+    runLogs = [];
+    appendLog('Starting run…');
+    invokeResult = "Starting run...";
     try {
-      const result = await invoke('run_pipeline', { nodes, edges });
-      const r = result as any;
-      runRowCount = typeof r?.row_count === 'number' ? r.row_count : null;
-      runFileSizeBytes = typeof r?.file_size_bytes === 'number' ? r.file_size_bytes : null;
-      runOutputPath = typeof r?.path === 'string' ? r.path : null;
-
-      const stats = Array.isArray(r?.node_stats) ? r.node_stats : [];
-      const statsMap = new Map<string, any>(stats.map((s: any) => [s.id, s]));
-      nodes = nodes.map((n: any) => {
-        const s = statsMap.get(n.id);
-        if (!s) return n;
-        return { ...n, data: { ...(n.data ?? {}), stats: { rows_left: s.rows_left, rows_right: s.rows_right, rows_out: s.rows_out } } };
-      });
-
-      runState = 'success';
-      if (runRowCount !== null && runFileSizeBytes !== null && runOutputPath) {
-        invokeResult = `Success: ${runRowCount} rows → ${runOutputPath} (${formatBytes(runFileSizeBytes)})`;
-      } else {
-        invokeResult = "Success";
-      }
+      const id = await invoke('start_pipeline_run', { nodes, edges });
+      runId = typeof id === 'string' ? id : id ? `${id}` : null;
+      if (runId) appendLog(`Run id: ${runId}`);
+      invokeResult = "Running pipeline...";
+      if (runId) void waitForRun(runId);
     } catch (e) {
       runState = 'error';
       invokeResult = `Error: ${e}`;
@@ -527,7 +728,47 @@
             onclick={() => addNode('join')}
             class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
           >
-            <span class="flex items-center gap-2"><span>⋈</span><span>Join</span></span>
+            <span class="flex items-center gap-2"><span>🎲</span><span>Join</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => addNode('filter')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>🔽</span><span>Filter</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => addNode('select')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>✅</span><span>Select</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => addNode('rename')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>✏️</span><span>Rename</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => addNode('cast')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>🧬</span><span>Cast</span></span>
+            <span class="text-warm-muted text-xs">Add</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => addNode('derived')}
+            class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><span>➕</span><span>Derived</span></span>
             <span class="text-warm-muted text-xs">Add</span>
           </button>
         </div>
@@ -538,8 +779,17 @@
       <button 
         onclick={testInvoke}
         class="w-full px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
+        disabled={runState === 'running'}
       >
         Run Pipeline
+      </button>
+      <button
+        type="button"
+        onclick={cancelRun}
+        class="w-full mt-2 px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
+        disabled={!runId}
+      >
+        Cancel
       </button>
       <div class="text-xs mt-2">
         {#if runState === 'running'}
@@ -551,6 +801,24 @@
         {:else}
           <div class="text-warm-muted">{invokeResult}</div>
         {/if}
+      </div>
+      <div class="mt-3 border border-warm-border rounded bg-warm-bg">
+        <div class="px-3 py-2 text-xs font-semibold text-warm-sub border-b border-warm-border">
+          Execution Log
+        </div>
+        <div class="max-h-44 overflow-auto px-3 py-2">
+          {#if runLogs.length === 0}
+            <div class="text-xs text-warm-muted">No logs yet</div>
+          {:else}
+            <div class="flex flex-col gap-1">
+              {#each runLogs as l (l.ts)}
+                <div class="text-[11px] text-warm-sub">
+                  {new Date(l.ts).toLocaleTimeString()} — {l.message}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </aside>
