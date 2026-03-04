@@ -1,13 +1,39 @@
 <script lang="ts">
   import { pipelineStore } from '$lib/stores/pipelineStore.svelte';
-  import { executionStore } from '$lib/stores/executionStore.svelte';
+  import { fileStore } from '$lib/stores/fileStore.svelte';
+  import PipelineMetaForm from './PipelineMetaForm.svelte';
 
   function addNode(type: Parameters<typeof pipelineStore.addNode>[0]) {
     pipelineStore.addNode(type);
+    fileStore.markDirty();
   }
 </script>
 
-<aside class="w-64 bg-warm-panel border-r border-warm-border p-4 flex flex-col">
+<aside class="w-64 bg-warm-panel border-r border-warm-border flex flex-col overflow-y-auto">
+  <!-- Pipeline Meta -->
+  <PipelineMetaForm />
+
+  <!-- File Actions -->
+  <div class="px-4 py-2 border-b border-warm-border flex gap-1">
+    <button
+      onclick={() => fileStore.newPipeline()}
+      class="flex-1 px-2 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
+      title="New Pipeline (⌘N)"
+    >New</button>
+    <button
+      onclick={() => void fileStore.loadPipeline()}
+      class="flex-1 px-2 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
+      title="Open Pipeline (⌘O)"
+    >Open</button>
+    <button
+      onclick={() => void fileStore.savePipeline()}
+      class="flex-1 px-2 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
+      title="Save Pipeline (⌘S)"
+    >Save</button>
+  </div>
+
+  <!-- Node Palette -->
+  <div class="p-4">
   <h2 class="text-warm-text font-bold mb-4">Node Palette</h2>
   <div class="flex flex-col gap-4">
     <div>
@@ -124,51 +150,5 @@
       </div>
     </div>
   </div>
-  
-  <div class="mt-auto border-t border-warm-border pt-4">
-    <button 
-      onclick={executionStore.startRun}
-      class="w-full px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
-      disabled={executionStore.runState === 'running'}
-    >
-      Run Pipeline
-    </button>
-    <button
-      type="button"
-      onclick={executionStore.cancelRun}
-      class="w-full mt-2 px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
-      disabled={!executionStore.runId}
-    >
-      Cancel
-    </button>
-    <div class="text-xs mt-2">
-      {#if executionStore.runState === 'running'}
-        <div class="text-warm-sub">Running…</div>
-      {:else if executionStore.runState === 'success'}
-        <div class="text-[#4A7C59]">{executionStore.invokeResult}</div>
-      {:else if executionStore.runState === 'error'}
-        <div class="text-[#B85C4A]">{executionStore.invokeResult}</div>
-      {:else}
-        <div class="text-warm-muted">{executionStore.invokeResult}</div>
-      {/if}
-    </div>
-    <div class="mt-3 border border-warm-border rounded bg-warm-bg">
-      <div class="px-3 py-2 text-xs font-semibold text-warm-sub border-b border-warm-border">
-        Execution Log
-      </div>
-      <div class="max-h-44 overflow-auto px-3 py-2">
-        {#if executionStore.runLogs.length === 0}
-          <div class="text-xs text-warm-muted">No logs yet</div>
-        {:else}
-          <div class="flex flex-col gap-1">
-            {#each executionStore.runLogs as l (l.ts)}
-              <div class="text-[11px] text-warm-sub">
-                {new Date(l.ts).toLocaleTimeString()} — {l.message}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    </div>
   </div>
 </aside>

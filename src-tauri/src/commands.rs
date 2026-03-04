@@ -188,17 +188,17 @@ pub async fn start_pipeline_run(
 #[tauri::command]
 pub async fn await_pipeline_run(
     run_manager: tauri::State<'_, Arc<RunManager>>,
-    runId: String,
+    run_id: String,
 ) -> Result<serde_json::Value, String> {
-    run_manager.await_run(&runId).await
+    run_manager.await_run(&run_id).await
 }
 
 #[tauri::command]
 pub async fn cancel_pipeline_run(
     run_manager: tauri::State<'_, Arc<RunManager>>,
-    runId: String,
+    run_id: String,
 ) -> Result<(), String> {
-    let ok = run_manager.cancel_run(&runId).await;
+    let ok = run_manager.cancel_run(&run_id).await;
     if ok {
         Ok(())
     } else {

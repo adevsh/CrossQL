@@ -1,18 +1,5 @@
 import { newId } from '$lib/utils';
-
-type NodeType =
-  | 'postgres'
-  | 'mysql'
-  | 'mongodb'
-  | 'cassandra'
-  | 'schema_map'
-  | 'join'
-  | 'filter'
-  | 'select'
-  | 'rename'
-  | 'cast'
-  | 'derived'
-  | 'parquet';
+import type { NodeType, PipelineEdge } from '$lib/types';
 
 function createPipelineStore() {
   let nodes = $state<any[]>([
@@ -64,44 +51,44 @@ function createPipelineStore() {
         id, type,
         data: {
           config: {
-            host: 'postgresql.crossql.orb.local', port: 5432,
-            user: 'postgres', password: 'postgres',
-            database: 'crossql', query: 'SELECT 1 as id'
+            host: '', port: 5432,
+            user: '', password: '',
+            database: '', query: ''
           }
         },
-        position
+        position: { x: 120, y: position.y }
       }),
       mysql: () => ({
         id, type,
         data: {
           config: {
-            host: 'mysql.crossql.orb.local', port: 3306,
-            user: 'crossql', password: 'crossql',
-            database: 'crossql', query: 'SELECT 1 as id'
+            host: '', port: 3306,
+            user: '', password: '',
+            database: '', query: ''
           }
         },
-        position
+        position: { x: 120, y: position.y }
       }),
       mongodb: () => ({
         id, type,
         data: {
           config: {
-            uri: 'mongodb://root:root@mongodb.crossql.orb.local:27017',
+            uri: '',
             database: '', collection: '',
             filter: '{}', projection: '{}', flatten_depth: 1
           }
         },
-        position
+        position: { x: 120, y: position.y }
       }),
       cassandra: () => ({
         id, type,
         data: {
           config: {
-            contact_points: 'cassandra.crossql.orb.local:9042',
-            keyspace: 'crossql', query: 'SELECT * FROM regions;'
+            contact_points: '',
+            keyspace: '', query: ''
           }
         },
-        position
+        position: { x: 120, y: position.y }
       }),
       schema_map: () => ({
         id, type,

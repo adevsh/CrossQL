@@ -1,5 +1,6 @@
 use polars::lazy::prelude::*;
 use polars::prelude::*;
+use super::types::parse_dtype;
 
 #[derive(serde::Deserialize, Clone)]
 pub struct SchemaMapConfig {
@@ -13,17 +14,6 @@ pub struct SchemaMapColumnConfig {
     pub cast: Option<String>,
     pub null_mode: Option<String>,
     pub fill_value: Option<String>,
-}
-
-fn parse_dtype(dtype: &str) -> Result<DataType, String> {
-    match dtype {
-        "Int64" => Ok(DataType::Int64),
-        "Float64" => Ok(DataType::Float64),
-        "Boolean" => Ok(DataType::Boolean),
-        "Utf8" => Ok(DataType::String),
-        "Datetime" => Ok(DataType::Datetime(TimeUnit::Milliseconds, None)),
-        _ => Err(format!("Unsupported dtype: {}", dtype)),
-    }
 }
 
 fn lit_for_dtype(dtype: &DataType, raw: &str) -> Result<Expr, String> {

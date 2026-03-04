@@ -4,6 +4,31 @@
   import { schemaStore } from '$lib/stores/schemaStore.svelte';
   import { executionStore } from '$lib/stores/executionStore.svelte';
   import { formatBytes } from '$lib/utils';
+  import { invoke } from '@tauri-apps/api/core';
+
+  let querySql = $state('SELECT * FROM result LIMIT 50');
+  let queryColumns = $state<string[]>([]);
+  let queryRows = $state<any[][]>([]);
+  let queryState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  let queryError = $state('');
+  let queryTotalRows = $state(0);
+
+  async function runQuery() {
+    const sel = pipelineStore.nodes.find((n: any) => n.id === pipelineStore.selectedNodeId);
+    if (!sel || sel.type !== 'parquet' || !sel.data?.config?.path) return;
+    queryState = 'loading';
+    queryError = '';
+    try {
+      const result = await invoke<any>('query_parquet', { path: sel.data.config.path, sql: querySql });
+      queryColumns = result.columns;
+      queryRows = result.rows;
+      queryTotalRows = result.total_rows;
+      queryState = 'ready';
+    } catch (e: any) {
+      queryError = e?.toString?.() ?? `${e}`;
+      queryState = 'error';
+    }
+  }
 </script>
 
 <aside class="w-80 bg-warm-panel border-l border-warm-border p-4 flex flex-col">
@@ -88,7 +113,111 @@
     {/if}
   </div>
 
-  <div class="mt-4 border-t border-warm-border pt-3">
+  <!-- Parquet SQL Query -->
+  {#if pipelineStore.selectedNodeId}
+    {@const selNode = pipelineStore.nodes.find((n: any) => n.id === pipelineStore.selectedNodeId)}
+    {#if selNode?.type === 'parquet' && selNode?.data?.config?.path}
+      <div class="border-t border-warm-border pt-3 mt-3">
+        <div class="text-xs text-warm-sub font-semibold mb-2">Query Output</div>
+        <div class="text-[10px] text-warm-muted mb-1">Table: <code class="text-warm-sub">result</code></div>
+        <textarea
+          bind:value={querySql}
+          rows="2"
+          class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-[#C07A3A] outline-none font-mono bg-white resize-y"
+          placeholder="SELECT * FROM result LIMIT 50"
+        ></textarea>
+        <button
+          onclick={() => void runQuery()}
+          class="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
+          disabled={queryState === 'loading'}
+        >
+          {queryState === 'loading' ? 'Running…' : '▶ Run Query'}
+        </button>
+        {#if queryState === 'error'}
+          <div class="mt-1 text-xs text-[#B85C4A]">{queryError}</div>
+        {/if}
+        {#if queryState === 'ready'}
+          <div class="mt-2 text-[10px] text-warm-muted">{queryTotalRows} row{queryTotalRows === 1 ? '' : 's'}</div>
+          {#if queryColumns.length > 0}
+            <div class="mt-1 border border-warm-border rounded overflow-auto max-h-48">
+              <table class="w-full text-xs">
+                <thead class="bg-warm-bg sticky top-0">
+                  <tr>
+                    {#each queryColumns as c (c)}
+                      <th class="text-left px-2 py-1 border-b border-warm-border font-semibold text-warm-sub whitespace-nowrap">{c}</th>
+                    {/each}
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each queryRows as row, i (i)}
+                    <tr class="odd:bg-white even:bg-warm-panel/40">
+                      {#each row as val, j (j)}
+                        <td class="px-2 py-1 border-b border-warm-border text-warm-text whitespace-nowrap">
+                          {val === null ? '—' : `${val}`}
+                        </td>
+                      {/each}
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        {/if}
+      </div>
+    {/if}
+  {/if}
+
+  <!-- Execution Controls -->
+  <div class="border-t border-warm-border pt-3 mt-4 space-y-2">
+    <div class="flex gap-2">
+      <button 
+        onclick={executionStore.startRun}
+        class="flex-1 px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
+        disabled={executionStore.runState === 'running'}
+      >
+        Run Pipeline
+      </button>
+      <button
+        type="button"
+        onclick={executionStore.cancelRun}
+        class="px-4 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm"
+        disabled={!executionStore.runId}
+      >
+        Cancel
+      </button>
+    </div>
+    <div class="text-xs">
+      {#if executionStore.runState === 'running'}
+        <div class="text-warm-sub">Running…</div>
+      {:else if executionStore.runState === 'success'}
+        <div class="text-[#4A7C59]">{executionStore.invokeResult}</div>
+      {:else if executionStore.runState === 'error'}
+        <div class="text-[#B85C4A]">{executionStore.invokeResult}</div>
+      {:else}
+        <div class="text-warm-muted">{executionStore.invokeResult}</div>
+      {/if}
+    </div>
+    <div class="border border-warm-border rounded bg-warm-bg">
+      <div class="px-3 py-1.5 text-xs font-semibold text-warm-sub border-b border-warm-border">
+        Execution Log
+      </div>
+      <div class="max-h-[6.5rem] overflow-auto px-3 py-2">
+        {#if executionStore.runLogs.length === 0}
+          <div class="text-xs text-warm-muted">No logs yet</div>
+        {:else}
+          <div class="flex flex-col gap-0.5">
+            {#each executionStore.runLogs as l (l.ts)}
+              <div class="text-[11px] text-warm-sub">
+                {new Date(l.ts).toLocaleTimeString()} — {l.message}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-3 border-t border-warm-border pt-3">
     <div class="text-xs text-warm-sub font-semibold mb-2">App Usage</div>
     {#if executionStore.usageState === 'loading'}
       <div class="text-xs text-warm-muted">Loading…</div>
