@@ -2,7 +2,7 @@ use crate::connectors::postgres::PostgresConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
-use crate::engine::pipeline::{FlowEdge, FlowNode, PipelineEngine, PipelineRunResult, PreviewResult};
+use crate::engine::pipeline::{FlowEdge, FlowNode, NodeProgressFn, PipelineEngine, PipelineRunResult, PreviewResult, noop_progress};
 use crate::run_manager::RunEntry;
 use crate::run_manager::RunManager;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ pub fn get_process_usage() -> Result<ProcessUsage, String> {
 
 #[tauri::command]
 pub async fn run_pipeline(nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> Result<PipelineRunResult, String> {
-    PipelineEngine::run(nodes, edges, true).await
+    PipelineEngine::run(nodes, edges, true, noop_progress()).await
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -105,7 +105,6 @@ pub async fn start_pipeline_run(
     nodes: Vec<FlowNode>,
     edges: Vec<FlowEdge>,
 ) -> Result<String, String> {
-    let node_ids: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
     let (run_id, entry) = run_manager.create_run().await;
     let run_id_clone = run_id.clone();
     let app_clone = app.clone();
@@ -124,21 +123,24 @@ pub async fn start_pipeline_run(
             },
         );
 
-        for id in &node_ids {
+        // Per-node progress callback
+        let progress_app = app_clone.clone();
+        let progress_run_id = run_id_clone.clone();
+        let on_progress: NodeProgressFn = Arc::new(move |node_id: &str, state: &str| {
             emit_pipeline_event(
-                &app_clone,
+                &progress_app,
                 PipelineEvent {
-                    run_id: run_id_clone.clone(),
+                    run_id: progress_run_id.clone(),
                     kind: "node_state".to_string(),
-                    node_id: Some(id.clone()),
-                    state: Some("running".to_string()),
+                    node_id: Some(node_id.to_string()),
+                    state: Some(state.to_string()),
                     message: None,
                     result: None,
                 },
             );
-        }
+        });
 
-        let run_fut = PipelineEngine::run(nodes, edges, false);
+        let run_fut = PipelineEngine::run(nodes, edges, false, on_progress);
         let outcome = tokio::select! {
             _ = entry_clone.cancel.cancelled() => Err("Cancelled".to_string()),
             res = run_fut => res,
@@ -161,19 +163,6 @@ pub async fn start_pipeline_run(
                         result: payload,
                     },
                 );
-                for id in &node_ids {
-                    emit_pipeline_event(
-                        &app_clone,
-                        PipelineEvent {
-                            run_id: run_id_clone.clone(),
-                            kind: "node_state".to_string(),
-                            node_id: Some(id.clone()),
-                            state: Some("done".to_string()),
-                            message: None,
-                            result: None,
-                        },
-                    );
-                }
             }
             Err(err) => {
                 let kind = if err == "Cancelled" { "run_cancelled" } else { "run_error" };
@@ -189,19 +178,6 @@ pub async fn start_pipeline_run(
                         result: None,
                     },
                 );
-                for id in &node_ids {
-                    emit_pipeline_event(
-                        &app_clone,
-                        PipelineEvent {
-                            run_id: run_id_clone.clone(),
-                            kind: "node_state".to_string(),
-                            node_id: Some(id.clone()),
-                            state: Some("error".to_string()),
-                            message: Some(err.clone()),
-                            result: None,
-                        },
-                    );
-                }
             }
         }
     });

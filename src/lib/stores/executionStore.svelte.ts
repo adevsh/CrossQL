@@ -62,17 +62,16 @@ function createExecutionStore() {
       } else {
         invokeResult = 'Success';
       }
+      // Node stats are applied on top of per-node states already set by the engine
       if (Array.isArray(r?.node_stats)) {
         pipelineStore.applyNodeStats(r.node_stats);
       }
-      pipelineStore.setAllNodeRunState('done');
       appendLog('Run finished');
       runId = null;
     } catch (e: any) {
       if (runId !== id) return;
       runState = 'error';
       invokeResult = `Error: ${e?.toString?.() ?? e}`;
-      pipelineStore.setAllNodeRunState('error', e?.toString?.() ?? `${e}`);
       appendLog(`Error: ${e?.toString?.() ?? e}`);
       runId = null;
     }
@@ -91,10 +90,16 @@ function createExecutionStore() {
   }
 
   async function startRun() {
+    if (runState === 'running') return;
     runState = 'running';
     runRowCount = null;
     runFileSizeBytes = null;
     runOutputPath = null;
+
+    pipelineStore.setAllNodeRunState('idle');
+    runLogs = [];
+    appendLog('Starting run…');
+    invokeResult = "Starting run...";
 
     const { nodes, edges } = pipelineStore;
 
@@ -150,10 +155,6 @@ function createExecutionStore() {
       return;
     }
 
-    pipelineStore.setAllNodeRunState('running');
-    runLogs = [];
-    appendLog('Starting run…');
-    invokeResult = "Starting run...";
     try {
       const id = await invoke('start_pipeline_run', { nodes, edges });
       runId = typeof id === 'string' ? id : id ? `${id}` : null;
@@ -182,8 +183,7 @@ function createExecutionStore() {
         runRowCount = null;
         runFileSizeBytes = null;
         runOutputPath = null;
-        runLogs = [];
-        pipelineStore.setAllNodeRunState('running');
+        pipelineStore.setAllNodeRunState('idle');
         appendLog('Run started');
         return;
       }
@@ -212,7 +212,7 @@ function createExecutionStore() {
         if (Array.isArray(p.result.node_stats)) {
           pipelineStore.applyNodeStats(p.result.node_stats);
         }
-        pipelineStore.setAllNodeRunState('done');
+
         appendLog('Run finished');
         runId = null;
         return;
@@ -221,7 +221,7 @@ function createExecutionStore() {
       if (p.kind === 'run_cancelled') {
         runState = 'idle';
         invokeResult = 'Cancelled';
-        pipelineStore.setAllNodeRunState('idle');
+
         appendLog('Run cancelled');
         runId = null;
         return;
@@ -230,7 +230,7 @@ function createExecutionStore() {
       if (p.kind === 'run_error') {
         runState = 'error';
         invokeResult = `Error: ${p.message ?? 'Unknown error'}`;
-        pipelineStore.setAllNodeRunState('error', p.message ?? 'Unknown error');
+
         appendLog(`Error: ${p.message ?? 'Unknown error'}`);
         runId = null;
       }

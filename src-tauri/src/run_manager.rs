@@ -21,17 +21,27 @@ impl RunEntry {
     }
 
     pub async fn set_result(&self, res: Result<serde_json::Value, String>) {
-        let mut r = self.result.lock().await;
-        *r = Some(res);
-        self.notify.notify_waiters();
+        {
+            let mut r = self.result.lock().await;
+            *r = Some(res);
+        }
+        // notify_one stores a permit if nobody is waiting yet,
+        // so the next notified().await returns immediately.
+        self.notify.notify_one();
     }
 
     pub async fn wait_result(&self) -> Result<serde_json::Value, String> {
         loop {
-            if let Some(res) = self.result.lock().await.clone() {
-                return res;
+            // Register the notification BEFORE checking the result
+            // to avoid lost notifications between check and await.
+            let notified = self.notify.notified();
+            {
+                let lock = self.result.lock().await;
+                if let Some(res) = lock.as_ref() {
+                    return res.clone();
+                }
             }
-            self.notify.notified().await;
+            notified.await;
         }
     }
 }

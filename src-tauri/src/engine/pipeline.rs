@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// Callback for per-node progress: (node_id, state) where state is "running" or "done".
 pub type NodeProgressFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
-fn noop_progress() -> NodeProgressFn {
+pub fn noop_progress() -> NodeProgressFn {
     Arc::new(|_node_id: &str, _state: &str| {})
 }
 
@@ -479,6 +479,7 @@ impl PipelineEngine {
         nodes: Vec<FlowNode>,
         edges: Vec<FlowEdge>,
         compute_stats: bool,
+        on_progress: NodeProgressFn,
     ) -> Result<PipelineRunResult, String> {
         let mut nodes_by_id: HashMap<String, FlowNode> = HashMap::new();
         for n in nodes {
@@ -507,6 +508,8 @@ impl PipelineEngine {
         let mut visiting: HashSet<String> = HashSet::new();
         let mut error_on_null_cols: Vec<String> = Vec::new();
 
+        on_progress(&out_node.id, "running");
+
         let lf = node_to_lazyframe(
             upstream_id,
             &nodes_by_id,
@@ -514,6 +517,7 @@ impl PipelineEngine {
             &mut cache,
             &mut visiting,
             &mut error_on_null_cols,
+            &on_progress,
         )
         .await?;
 
@@ -533,6 +537,8 @@ impl PipelineEngine {
         let file_size_bytes = fs::metadata(&out_cfg.path)
             .map_err(|e| format!("Failed to stat output file: {}", e))?
             .len();
+
+        on_progress(&out_node.id, "done");
 
         let node_stats: Vec<NodeStats> = if compute_stats {
             let mut node_stats: Vec<NodeStats> = Vec::new();
@@ -587,6 +593,7 @@ impl PipelineEngine {
         let mut cache: HashMap<String, LazyFrame> = HashMap::new();
         let mut visiting: HashSet<String> = HashSet::new();
         let mut error_on_null_cols: Vec<String> = Vec::new();
+        let progress = noop_progress();
 
         let node = nodes_by_id
             .get(&node_id)
@@ -607,6 +614,7 @@ impl PipelineEngine {
                 &mut cache,
                 &mut visiting,
                 &mut error_on_null_cols,
+                &progress,
             )
             .await?
             .limit(200);
@@ -617,6 +625,7 @@ impl PipelineEngine {
                 &mut cache,
                 &mut visiting,
                 &mut error_on_null_cols,
+                &progress,
             )
             .await?
             .limit(200);
@@ -640,6 +649,7 @@ impl PipelineEngine {
                 &mut cache,
                 &mut visiting,
                 &mut error_on_null_cols,
+                &progress,
             )
             .await?
         };
