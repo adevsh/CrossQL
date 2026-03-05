@@ -1,8 +1,9 @@
 # CrossQL
 
-A desktop ETL pipeline builder for joining data across multiple heterogeneous databases — visually.
+A desktop query federation engine for visually joining and analyzing data across multiple heterogeneous databases.
 
-Built with **Tauri 2 + Svelte 5 + Polars (Rust)**. Designed and structured by me, with implementation assisted by AI agents.
+Built with **Tauri 2 + Svelte 5 + Polars (Rust)**.
+Designed and structured by me, with implementation assisted by AI tools.
 
 ## What It Does
 
