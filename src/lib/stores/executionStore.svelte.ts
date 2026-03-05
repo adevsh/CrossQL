@@ -157,10 +157,15 @@ function createExecutionStore() {
 
     try {
       const id = await invoke('start_pipeline_run', { nodes, edges });
-      runId = typeof id === 'string' ? id : id ? `${id}` : null;
-      if (runId) appendLog(`Run id: ${runId}`);
-      invokeResult = "Running pipeline...";
-      if (runId) void waitForRun(runId);
+      const localId = typeof id === 'string' ? id : id ? `${id}` : null;
+      // Guard: events may have already arrived and completed the run
+      // while we were awaiting the invoke call. Only proceed if still running.
+      if (runState === 'running') {
+        runId = localId;
+        if (localId) appendLog(`Run id: ${localId}`);
+        invokeResult = 'Running pipeline…';
+        if (localId) void waitForRun(localId);
+      }
     } catch (e) {
       runState = 'error';
       invokeResult = `Error: ${e}`;
@@ -196,9 +201,9 @@ function createExecutionStore() {
         return;
       }
 
-      if (p.kind === 'run_finished' && p.result) {
+      if (p.kind === 'run_finished') {
         runState = 'success';
-        if (typeof p.result?.row_count === 'number' && typeof p.result?.file_size_bytes === 'number' && typeof p.result?.path === 'string') {
+        if (p.result && typeof p.result?.row_count === 'number' && typeof p.result?.file_size_bytes === 'number' && typeof p.result?.path === 'string') {
           const rowCount = p.result.row_count as number;
           const fileSizeBytes = p.result.file_size_bytes as number;
           const outPath = p.result.path as string;
@@ -209,7 +214,7 @@ function createExecutionStore() {
         } else {
           invokeResult = 'Success';
         }
-        if (Array.isArray(p.result.node_stats)) {
+        if (Array.isArray(p.result?.node_stats)) {
           pipelineStore.applyNodeStats(p.result.node_stats);
         }
 

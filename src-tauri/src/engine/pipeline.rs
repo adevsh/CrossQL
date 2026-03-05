@@ -521,63 +521,76 @@ impl PipelineEngine {
         )
         .await?;
 
-        let df = lf
-            .collect()
-            .map_err(|e| format!("Failed to execute pipeline: {}", e))?;
-        validate_no_nulls(&df, &error_on_null_cols)?;
+        // Polars `collect()` internally creates its own Tokio runtime, which panics
+        // if called from within the existing Tauri Tokio runtime. `spawn_blocking`
+        // does NOT work because its threads still inherit the runtime context.
+        // We use `std::thread::spawn` to create a completely clean OS thread.
+        let out_node_id = out_node.id.clone();
+        let on_progress_clone = on_progress.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<PipelineRunResult, String> {
+                let df = lf
+                    .collect()
+                    .map_err(|e| format!("Failed to execute pipeline: {}", e))?;
+                validate_no_nulls(&df, &error_on_null_cols)?;
 
-        let output_row_count = df.height();
-        CrossQLParquetWriter::write_dataframe(
-            df,
-            &out_cfg.path,
-            &out_cfg.compression,
-            out_cfg.row_group_size,
-        )?;
+                let output_row_count = df.height();
+                CrossQLParquetWriter::write_dataframe(
+                    df,
+                    &out_cfg.path,
+                    &out_cfg.compression,
+                    out_cfg.row_group_size,
+                )?;
 
-        let file_size_bytes = fs::metadata(&out_cfg.path)
-            .map_err(|e| format!("Failed to stat output file: {}", e))?
-            .len();
+                let file_size_bytes = fs::metadata(&out_cfg.path)
+                    .map_err(|e| format!("Failed to stat output file: {}", e))?
+                    .len();
 
-        on_progress(&out_node.id, "done");
+                on_progress_clone(&out_node_id, "done");
 
-        let node_stats: Vec<NodeStats> = if compute_stats {
-            let mut node_stats: Vec<NodeStats> = Vec::new();
-            for (id, lf) in cache.iter() {
-                let node = nodes_by_id.get(id);
-                if let Some(n) = node {
-                    if n.node_type == "join" {
-                        let (left_id, right_id) = resolve_join_inputs(&edges, id)?;
-                        let rows_left = cache.get(&left_id).and_then(|x| compute_row_count(x).ok());
-                        let rows_right = cache.get(&right_id).and_then(|x| compute_row_count(x).ok());
+                let node_stats: Vec<NodeStats> = if compute_stats {
+                    let mut node_stats: Vec<NodeStats> = Vec::new();
+                    for (id, lf) in cache.iter() {
+                        let node = nodes_by_id.get(id);
+                        if let Some(n) = node {
+                            if n.node_type == "join" {
+                                let (left_id, right_id) = resolve_join_inputs(&edges, id)?;
+                                let rows_left = cache.get(&left_id).and_then(|x| compute_row_count(x).ok());
+                                let rows_right = cache.get(&right_id).and_then(|x| compute_row_count(x).ok());
+                                let rows_out = compute_row_count(lf).ok();
+                                node_stats.push(NodeStats {
+                                    id: id.clone(),
+                                    rows_left,
+                                    rows_right,
+                                    rows_out,
+                                });
+                                continue;
+                            }
+                        }
                         let rows_out = compute_row_count(lf).ok();
                         node_stats.push(NodeStats {
                             id: id.clone(),
-                            rows_left,
-                            rows_right,
+                            rows_left: None,
+                            rows_right: None,
                             rows_out,
                         });
-                        continue;
                     }
-                }
-                let rows_out = compute_row_count(lf).ok();
-                node_stats.push(NodeStats {
-                    id: id.clone(),
-                    rows_left: None,
-                    rows_right: None,
-                    rows_out,
-                });
-            }
-            node_stats
-        } else {
-            Vec::new()
-        };
+                    node_stats
+                } else {
+                    Vec::new()
+                };
 
-        Ok(PipelineRunResult {
-            row_count: output_row_count,
-            path: out_cfg.path,
-            file_size_bytes,
-            node_stats,
-        })
+                Ok(PipelineRunResult {
+                    row_count: output_row_count,
+                    path: out_cfg.path,
+                    file_size_bytes,
+                    node_stats,
+                })
+            })();
+            let _ = tx.send(result);
+        });
+        rx.await.map_err(|_| "Pipeline thread panicked".to_string())?
     }
 
     pub async fn preview_node(
@@ -654,10 +667,17 @@ impl PipelineEngine {
             .await?
         };
 
-        let df = lf
-            .limit(50)
-            .collect()
-            .map_err(|e| format!("Failed to execute preview: {}", e))?;
-        df_preview(&df, 50)
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = (|| {
+                let df = lf
+                    .limit(50)
+                    .collect()
+                    .map_err(|e| format!("Failed to execute preview: {}", e))?;
+                df_preview(&df, 50)
+            })();
+            let _ = tx.send(result);
+        });
+        rx.await.map_err(|_| "Preview thread panicked".to_string())?
     }
 }

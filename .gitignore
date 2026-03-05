@@ -11,3 +11,4 @@ vite.config.ts.timestamp-*
 SKILL.md
 *.complete
 *.parquet
+current-condition.txt

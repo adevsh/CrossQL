@@ -13,6 +13,17 @@
   let queryError = $state('');
   let queryTotalRows = $state(0);
 
+  // Reset query results when the selected node or output file changes
+  $effect(() => {
+    const _ = pipelineStore.selectedNodeId;
+    const __ = executionStore.runOutputPath;
+    queryState = 'idle';
+    queryColumns = [];
+    queryRows = [];
+    queryTotalRows = 0;
+    queryError = '';
+  });
+
   async function runQuery() {
     const sel = pipelineStore.nodes.find((n: any) => n.id === pipelineStore.selectedNodeId);
     if (!sel || sel.type !== 'parquet' || !sel.data?.config?.path) return;
@@ -113,12 +124,17 @@
     {/if}
   </div>
 
-  <!-- Parquet SQL Query -->
+  <!-- Parquet SQL Query — only shown when this file has been written by a successful run -->
   {#if pipelineStore.selectedNodeId}
     {@const selNode = pipelineStore.nodes.find((n: any) => n.id === pipelineStore.selectedNodeId)}
-    {#if selNode?.type === 'parquet' && selNode?.data?.config?.path}
+    {@const nodePath = selNode?.data?.config?.path}
+    {@const fileReady = selNode?.type === 'parquet' && nodePath && executionStore.runOutputPath === nodePath}
+    {#if fileReady}
       <div class="border-t border-warm-border pt-3 mt-3">
-        <div class="text-xs text-warm-sub font-semibold mb-2">Query Output</div>
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-xs text-warm-sub font-semibold">Query Output</div>
+          <div class="text-[10px] text-[#4A7C59]">✓ File ready</div>
+        </div>
         <div class="text-[10px] text-warm-muted mb-1">Table: <code class="text-warm-sub">result</code></div>
         <textarea
           bind:value={querySql}
@@ -131,7 +147,7 @@
           class="mt-1 w-full px-3 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
           disabled={queryState === 'loading'}
         >
-          {queryState === 'loading' ? 'Running…' : '▶ Run Query'}
+          {queryState === 'loading' ? 'Querying…' : '▶ Run Query'}
         </button>
         {#if queryState === 'error'}
           <div class="mt-1 text-xs text-[#B85C4A]">{queryError}</div>
