@@ -1,4 +1,5 @@
 use crate::connectors::cassandra::CassandraConnector;
+use crate::connectors::file::FileConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::postgres::PostgresConnector;
@@ -81,6 +82,11 @@ pub struct CassandraSourceConfig {
     pub contact_points: String,
     pub keyspace: String,
     pub query: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct FileSourceConfig {
+    pub path: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -290,6 +296,24 @@ fn node_to_lazyframe<'a>(
                 serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
                     .map_err(|e| format!("Invalid cassandra config: {}", e))?;
             let df = CassandraConnector::fetch_dataframe(&cfg.contact_points, &cfg.keyspace, &cfg.query).await?;
+            df.lazy()
+        }
+        "file" => {
+            let cfg: FileSourceConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid file config: {}", e))?;
+            if cfg.path.trim().is_empty() {
+                return Err("File Source: no file path configured".to_string());
+            }
+            // FileConnector::load_dataframe is synchronous blocking I/O.
+            // spawn_blocking is safe here because it does NOT call Polars collect internally
+            // (it reads raw bytes and builds the DataFrame directly for XLSX,
+            // or uses collect which for CSV/Parquet runs Polars' Rayon thread pool, not Tokio).
+            // If a nested-runtime panic is observed here, switch to std::thread::spawn.
+            let path = cfg.path.clone();
+            let df = tokio::task::spawn_blocking(move || FileConnector::load_dataframe(&path))
+                .await
+                .map_err(|e| format!("File read thread panicked: {}", e))??;
             df.lazy()
         }
         "schema_map" => {

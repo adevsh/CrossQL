@@ -2,6 +2,7 @@ use crate::connectors::postgres::PostgresConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
+use crate::connectors::file::FileConnector;
 use crate::engine::pipeline::{FlowEdge, FlowNode, NodeProgressFn, PipelineEngine, PipelineRunResult, PreviewResult, noop_progress};
 use crate::run_manager::RunEntry;
 use crate::run_manager::RunManager;
@@ -282,4 +283,19 @@ pub async fn preview_cassandra_schema(source: CassandraConfig) -> Result<Vec<Sch
         .into_iter()
         .map(|(name, dtype)| SchemaField { name, dtype })
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_file_schema(path: String) -> Result<Vec<SchemaField>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = FileConnector::describe_schema(&path)
+            .map(|fields| 
+                fields.into_iter()
+                    .map(|(name, dtype)| SchemaField { name, dtype })
+                    .collect::<Vec<_>>()
+            );
+        let _ = tx.send(result);
+    });
+    rx.await.map_err(|_| "Schema thread panicked".to_string())?
 }

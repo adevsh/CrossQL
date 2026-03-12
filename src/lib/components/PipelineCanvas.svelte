@@ -5,6 +5,7 @@
   import MySQLSourceNode from './nodes/MySQLSourceNode.svelte';
   import MongoSourceNode from './nodes/MongoSourceNode.svelte';
   import CassandraSourceNode from './nodes/CassandraSourceNode.svelte';
+  import FileSourceNode from './nodes/FileSourceNode.svelte';
   import SchemaMapNode from './nodes/SchemaMapNode.svelte';
   import JoinNode from './nodes/JoinNode.svelte';
   import FilterNode from './nodes/FilterNode.svelte';
@@ -21,6 +22,7 @@
     mysql: MySQLSourceNode,
     mongodb: MongoSourceNode,
     cassandra: CassandraSourceNode,
+    file: FileSourceNode,
     schema_map: SchemaMapNode,
     join: JoinNode,
     filter: FilterNode,

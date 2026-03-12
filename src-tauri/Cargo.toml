@@ -28,8 +28,10 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 
 polars = { version = "0.53.0", features = [
-  "lazy", "parquet", "json", "dtype-datetime", "dtype-categorical", "strings", "regex", "sql"
+  "lazy", "parquet", "json", "csv", "dtype-datetime", "dtype-categorical", "strings", "regex", "sql"
 ] }
+
+calamine = { version = "0.26", features = ["dates"] }
 
 sqlx = { version = "0.8", features = [
   "postgres", "mysql", "runtime-tokio", "tls-rustls", "chrono", "uuid"

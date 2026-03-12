@@ -33,11 +33,18 @@ async function fetchSchemaForNode(nodeId: string, depth = 0): Promise<Array<{ na
     return applySchemaMap(upstreamSchema, node.data?.config);
   }
 
-  if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra') {
+  if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && node.type !== 'file') {
     throw new Error('Schema preview is only available for source and Schema Map nodes');
   }
 
   if (!node.data?.config) throw new Error('Missing node config');
+
+  if (node.type === 'file') {
+    const path = node.data.config?.path ?? '';
+    if (!path) throw new Error('File path not configured');
+    const result = await invoke('get_file_schema', { path });
+    return (result as any[])?.map((x: any) => ({ name: x.name, dtype: x.dtype })) ?? [];
+  }
 
   const command =
     node.type === 'postgres'
@@ -70,7 +77,7 @@ function createSchemaStore() {
     if (!selectedNodeId) return;
     const node = pipelineStore.nodes.find((n: any) => n.id === selectedNodeId);
     if (!node) return;
-    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && node.type !== 'schema_map') return;
+    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && node.type !== 'file' && node.type !== 'schema_map') return;
 
     schemaState = 'loading';
     try {
