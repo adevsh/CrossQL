@@ -12,6 +12,8 @@ export type NodeType =
   | 'mongodb' 
   | 'cassandra' 
   | 'file'
+  | 'csv_source'
+  | 'parquet_source'
   | 'join' 
   | 'schema_map' 
   | 'filter' 

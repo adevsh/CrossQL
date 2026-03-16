@@ -51,7 +51,7 @@
         <div class="text-sm text-warm-text font-medium mb-1">
           {selectedNode.type} ({selectedNode.id})
         </div>
-        {#if selectedNode.type === 'postgres' || selectedNode.type === 'mysql' || selectedNode.type === 'mongodb' || selectedNode.type === 'cassandra' || selectedNode.type === 'schema_map'}
+        {#if selectedNode.type === 'postgres' || selectedNode.type === 'mysql' || selectedNode.type === 'mongodb' || selectedNode.type === 'cassandra' || selectedNode.type === 'file' || selectedNode.type === 'csv_source' || selectedNode.type === 'parquet_source' || selectedNode.type === 'schema_map'}
           <div class="text-xs text-warm-sub mb-2">
             {selectedNode.type === 'schema_map' ? 'Schema (after map)' : 'Schema'}
           </div>

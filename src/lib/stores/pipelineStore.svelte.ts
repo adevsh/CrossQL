@@ -90,6 +90,21 @@ function createPipelineStore() {
         },
         position: { x: 120, y: position.y }
       }),
+      file: () => ({
+        id, type,
+        data: { config: { path: '' } },
+        position: { x: 120, y: position.y }
+      }),
+      csv_source: () => ({
+        id, type,
+        data: { config: { path: '' } },
+        position: { x: 120, y: position.y }
+      }),
+      parquet_source: () => ({
+        id, type,
+        data: { config: { path: '' } },
+        position: { x: 120, y: position.y }
+      }),
       schema_map: () => ({
         id, type,
         data: { config: { columns: [] } },

@@ -73,10 +73,26 @@
         </button>
         <button
           type="button"
+          onclick={() => addNode('csv_source')}
+          class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+        >
+          <span class="flex items-center gap-2"><span>🧾</span><span>CSV Source</span></span>
+          <span class="text-warm-muted text-xs">Add</span>
+        </button>
+        <button
+          type="button"
+          onclick={() => addNode('parquet_source')}
+          class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
+        >
+          <span class="flex items-center gap-2"><span>🪵</span><span>Parquet Source</span></span>
+          <span class="text-warm-muted text-xs">Add</span>
+        </button>
+        <button
+          type="button"
           onclick={() => addNode('file')}
           class="w-full px-3 py-2 bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors text-sm flex items-center justify-between"
         >
-          <span class="flex items-center gap-2"><span>📂</span><span>File Source</span></span>
+          <span class="flex items-center gap-2"><span>📂</span><span>File Source (Any)</span></span>
           <span class="text-warm-muted text-xs">Add</span>
         </button>
       </div>

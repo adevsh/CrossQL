@@ -23,6 +23,8 @@
     mongodb: MongoSourceNode,
     cassandra: CassandraSourceNode,
     file: FileSourceNode,
+    csv_source: FileSourceNode,
+    parquet_source: FileSourceNode,
     schema_map: SchemaMapNode,
     join: JoinNode,
     filter: FilterNode,

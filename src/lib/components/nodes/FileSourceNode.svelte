@@ -2,11 +2,40 @@
   import { Handle, Position, useSvelteFlow } from '@xyflow/svelte';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  let { id, data } = $props();
+  let { id, data, type } = $props();
   const { deleteElements } = useSvelteFlow();
 
   let filePath = $state(data.config?.path || '');
+  let sourceKind = $derived(resolveSourceKind(type));
+  let title = $derived(resolveTitle(sourceKind));
+  let icon = $derived(resolveIcon(sourceKind));
+  let allowedExtensions = $derived(resolveAllowedExtensions(sourceKind));
   let detectedType = $derived(detectType(filePath));
+  let isAllowedType = $derived(!filePath || allowedExtensions.includes((filePath.split('.').pop()?.toLowerCase() ?? '')));
+
+  function resolveSourceKind(nodeType: string): 'csv' | 'parquet' | 'file' {
+    if (nodeType === 'csv_source') return 'csv';
+    if (nodeType === 'parquet_source') return 'parquet';
+    return 'file';
+  }
+
+  function resolveTitle(kind: 'csv' | 'parquet' | 'file') {
+    if (kind === 'csv') return 'CSV Source';
+    if (kind === 'parquet') return 'Parquet Source';
+    return 'File Source';
+  }
+
+  function resolveIcon(kind: 'csv' | 'parquet' | 'file') {
+    if (kind === 'csv') return '🧾';
+    if (kind === 'parquet') return '🪵';
+    return '📂';
+  }
+
+  function resolveAllowedExtensions(kind: 'csv' | 'parquet' | 'file') {
+    if (kind === 'csv') return ['csv'];
+    if (kind === 'parquet') return ['parquet'];
+    return ['csv', 'xlsx', 'xls', 'parquet'];
+  }
 
   function detectType(p: string): string {
     const ext = p.split('.').pop()?.toLowerCase() ?? '';
@@ -39,14 +68,20 @@
 
   async function browse(e: Event) {
     e.stopPropagation();
+    const filters =
+      sourceKind === 'csv'
+        ? [{ name: 'CSV', extensions: ['csv'] }]
+        : sourceKind === 'parquet'
+          ? [{ name: 'Parquet', extensions: ['parquet'] }]
+          : [
+              { name: 'Supported Files', extensions: ['csv', 'xlsx', 'xls', 'parquet'] },
+              { name: 'CSV', extensions: ['csv'] },
+              { name: 'Excel', extensions: ['xlsx', 'xls'] },
+              { name: 'Parquet', extensions: ['parquet'] }
+            ];
     const selected = await open({
       multiple: false,
-      filters: [
-        { name: 'Supported Files', extensions: ['csv', 'xlsx', 'xls', 'parquet'] },
-        { name: 'CSV', extensions: ['csv'] },
-        { name: 'Excel', extensions: ['xlsx', 'xls'] },
-        { name: 'Parquet', extensions: ['parquet'] },
-      ],
+      filters,
     });
     if (typeof selected === 'string') {
       filePath = selected;
@@ -65,8 +100,8 @@
   <div class="px-3 py-2 border-b border-warm-border flex items-center justify-between bg-warm-bg rounded-t">
     <div class="flex items-center gap-2">
       <span class={"w-3 h-3 rounded-full border-2 " + statusRingClass()}></span>
-      <span class="text-xl">📂</span>
-      <span class="font-bold text-warm-text text-sm">File Source</span>
+      <span class="text-xl">{icon}</span>
+      <span class="font-bold text-warm-text text-sm">{title}</span>
       {#if detectedType}
         <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#7A5C9C]/10 text-[#7A5C9C] font-semibold">{detectedType}</span>
       {/if}
@@ -104,8 +139,8 @@
           Browse
         </button>
       </div>
-      {#if filePath && !detectType(filePath)}
-        <div class="mt-1 text-[10px] text-[#B85C4A]">Unsupported extension — use .csv, .xlsx, .xls, or .parquet</div>
+      {#if filePath && !isAllowedType}
+        <div class="mt-1 text-[10px] text-[#B85C4A]">Unsupported extension — use {allowedExtensions.map((x) => `.${x}`).join(', ')}</div>
       {:else if filePath}
         <div class="mt-1 text-[10px] text-warm-muted truncate">{filePath.split('/').pop()}</div>
       {/if}

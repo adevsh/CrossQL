@@ -298,12 +298,24 @@ fn node_to_lazyframe<'a>(
             let df = CassandraConnector::fetch_dataframe(&cfg.contact_points, &cfg.keyspace, &cfg.query).await?;
             df.lazy()
         }
-        "file" => {
+        "file" | "csv_source" | "parquet_source" => {
             let cfg: FileSourceConfig =
                 serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
                     .map_err(|e| format!("Invalid file config: {}", e))?;
             if cfg.path.trim().is_empty() {
                 return Err("File Source: no file path configured".to_string());
+            }
+            let ext = cfg
+                .path
+                .rsplit('.')
+                .next()
+                .map(|x| x.to_ascii_lowercase())
+                .unwrap_or_default();
+            if node.node_type == "csv_source" && ext != "csv" {
+                return Err("CSV Source only supports .csv files".to_string());
+            }
+            if node.node_type == "parquet_source" && ext != "parquet" {
+                return Err("Parquet Source only supports .parquet files".to_string());
             }
             // FileConnector::load_dataframe is synchronous blocking I/O.
             // spawn_blocking is safe here because it does NOT call Polars collect internally

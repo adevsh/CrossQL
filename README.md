@@ -28,6 +28,8 @@ Connect to multiple databases, design pipelines on a drag-and-drop canvas, join 
 | MySQL | `sqlx` | TCP |
 | MongoDB | `mongodb` crate | TCP |
 | Cassandra | `cdrs-tokio` | CQL |
+| CSV | Polars CSV reader | Local file |
+| Parquet | Polars Parquet scanner | Local file |
 
 ## Prerequisites
 

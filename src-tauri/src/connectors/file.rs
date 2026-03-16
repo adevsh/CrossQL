@@ -1,4 +1,4 @@
-use calamine::{open_workbook_auto, DataType as XlsDataType, Reader};
+use calamine::{open_workbook_auto, Data as XlsDataType, Reader};
 use polars::prelude::{Column as PolarsColumn, *};
 use std::path::Path;
 
@@ -84,13 +84,16 @@ fn read_xlsx(path: &str) -> Result<DataFrame, String> {
         }
     }
 
+    let height = col_data.first().map(|x| x.len()).unwrap_or(0);
     let series_vec: Vec<PolarsColumn> = headers
         .iter()
         .zip(col_data.iter())
-        .map(|(name, vals)| Series::new(name.as_str().into(), vals.clone()).into())
+        .map(|(name, vals): (&String, &Vec<Option<String>>)| {
+            Series::new(name.as_str().into(), vals.clone()).into()
+        })
         .collect();
 
-    DataFrame::new(series_vec).map_err(|e| format!("Failed to build DataFrame: {}", e))
+    DataFrame::new(height, series_vec).map_err(|e| format!("Failed to build DataFrame: {}", e))
 }
 
 impl FileConnector {
@@ -105,7 +108,7 @@ impl FileConnector {
 
         let df = match ext.as_str() {
             "csv" => {
-                let lf = LazyCsvReader::new(path)
+                let lf = LazyCsvReader::new(path.into())
                     .with_has_header(true)
                     .finish()
                     .map_err(|e| format!("Failed to read CSV: {}", e))?;
