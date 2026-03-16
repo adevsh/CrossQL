@@ -75,7 +75,7 @@
           {:else}
             <div class="text-xs text-warm-muted">Select a source node to preview schema</div>
           {/if}
-        {:else if selectedNode.type === 'join'}
+        {:else if selectedNode.type === 'join' || selectedNode.type === 'schema_map' || selectedNode.type === 'filter' || selectedNode.type === 'select' || selectedNode.type === 'rename' || selectedNode.type === 'cast' || selectedNode.type === 'derived'}
           <div class="text-xs text-warm-sub mb-2">Preview (first 50 rows)</div>
           {#if schemaStore.previewState === 'loading'}
             <div class="text-xs text-warm-muted">Loading…</div>
@@ -109,7 +109,7 @@
               </div>
             {/if}
           {:else}
-            <div class="text-xs text-warm-muted">Select a Join node to preview</div>
+            <div class="text-xs text-warm-muted">Select a transform or join node to preview</div>
           {/if}
         {:else}
           <div class="text-xs text-warm-muted">No schema preview for this node type</div>

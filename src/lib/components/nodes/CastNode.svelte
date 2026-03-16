@@ -6,7 +6,7 @@
 
   type Cast = { column: string; dtype: 'Int64' | 'Float64' | 'Boolean' | 'Utf8' | 'Datetime' };
 
-  let casts = $state<Cast[]>((data.config?.casts as Cast[] | undefined) ?? []);
+  let casts = $state<Cast[]>([]);
 
   function stopFlowEvents(e: Event) {
     e.stopPropagation();
@@ -38,6 +38,11 @@
     casts = casts.filter((_, i) => i !== idx);
     updateConfig();
   }
+
+  $effect(() => {
+    const nextCasts = Array.isArray(data?.config?.casts) ? (data.config.casts as Cast[]) : [];
+    if (casts !== nextCasts) casts = nextCasts;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#C49A3C] border border-warm-border rounded shadow-sm w-[28rem]">
@@ -59,7 +64,7 @@
     </button>
   </div>
 
-  <div class="nodrag p-3 flex flex-col gap-3 relative" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
+  <div class="nodrag p-3 flex flex-col gap-3 relative" role="group" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
     <Handle type="target" position={Position.Left} class="!bg-[#C49A3C] !w-3 !h-3 !-left-1.5" />
     <Handle type="source" position={Position.Right} class="!bg-[#C49A3C] !w-3 !h-3" />
 

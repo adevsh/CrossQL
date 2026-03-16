@@ -4,12 +4,12 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
   
-  let host = $state(data.config?.host || 'localhost');
-  let port = $state(data.config?.port || 3306);
-  let database = $state(data.config?.database || '');
-  let user = $state(data.config?.user || '');
-  let password = $state(data.config?.password || '');
-  let query = $state(data.config?.query || 'SELECT * FROM table');
+  let host = $state('localhost');
+  let port = $state(3306);
+  let database = $state('');
+  let user = $state('');
+  let password = $state('');
+  let query = $state('SELECT * FROM table');
 
   function statusRingClass() {
     const s = data?.run_state;
@@ -31,6 +31,22 @@
     e.stopPropagation();
     await deleteElements({ nodes: [{ id }] });
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextHost = typeof cfg.host === 'string' ? cfg.host : 'localhost';
+    const nextPort = typeof cfg.port === 'number' ? cfg.port : 3306;
+    const nextDatabase = typeof cfg.database === 'string' ? cfg.database : '';
+    const nextUser = typeof cfg.user === 'string' ? cfg.user : '';
+    const nextPassword = typeof cfg.password === 'string' ? cfg.password : '';
+    const nextQuery = typeof cfg.query === 'string' ? cfg.query : 'SELECT * FROM table';
+    if (host !== nextHost) host = nextHost;
+    if (port !== nextPort) port = nextPort;
+    if (database !== nextDatabase) database = nextDatabase;
+    if (user !== nextUser) user = nextUser;
+    if (password !== nextPassword) password = nextPassword;
+    if (query !== nextQuery) query = nextQuery;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#4A7C59] border border-warm-border rounded shadow-sm w-80">
@@ -55,8 +71,9 @@
   <div class="nodrag p-3 flex flex-col gap-3 relative">
     <div class="grid grid-cols-3 gap-2">
       <div class="col-span-2">
-        <label class="text-xs text-warm-sub font-medium">Host</label>
+        <label for="mysql-host-{id}" class="text-xs text-warm-sub font-medium">Host</label>
         <input 
+          id="mysql-host-{id}"
           type="text" 
           bind:value={host} 
           oninput={updateConfig}
@@ -64,8 +81,9 @@
         />
       </div>
       <div>
-        <label class="text-xs text-warm-sub font-medium">Port</label>
+        <label for="mysql-port-{id}" class="text-xs text-warm-sub font-medium">Port</label>
         <input 
+          id="mysql-port-{id}"
           type="number" 
           bind:value={port} 
           oninput={updateConfig}
@@ -76,8 +94,9 @@
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Database</label>
+        <label for="mysql-database-{id}" class="text-xs text-warm-sub font-medium">Database</label>
         <input 
+          id="mysql-database-{id}"
           type="text" 
           bind:value={database} 
           oninput={updateConfig}
@@ -85,8 +104,9 @@
         />
       </div>
       <div>
-        <label class="text-xs text-warm-sub font-medium">User</label>
+        <label for="mysql-user-{id}" class="text-xs text-warm-sub font-medium">User</label>
         <input 
+          id="mysql-user-{id}"
           type="text" 
           bind:value={user} 
           oninput={updateConfig}
@@ -96,8 +116,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Password</label>
+      <label for="mysql-password-{id}" class="text-xs text-warm-sub font-medium">Password</label>
       <input 
+        id="mysql-password-{id}"
         type="password" 
         bind:value={password} 
         oninput={updateConfig}
@@ -106,8 +127,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">SQL Query</label>
+      <label for="mysql-query-{id}" class="text-xs text-warm-sub font-medium">SQL Query</label>
       <textarea 
+        id="mysql-query-{id}"
         bind:value={query} 
         oninput={updateConfig}
         class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-accent outline-none h-20 font-mono"

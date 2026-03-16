@@ -5,7 +5,7 @@
   let { id, data, type } = $props();
   const { deleteElements } = useSvelteFlow();
 
-  let filePath = $state(data.config?.path || '');
+  let filePath = $state('');
   let sourceKind = $derived(resolveSourceKind(type));
   let title = $derived(resolveTitle(sourceKind));
   let icon = $derived(resolveIcon(sourceKind));
@@ -90,8 +90,9 @@
   }
 
   $effect(() => {
-    if (data.config?.path !== undefined && data.config.path !== filePath) {
-      filePath = data.config.path;
+    const nextPath = typeof data?.config?.path === 'string' ? data.config.path : '';
+    if (nextPath !== filePath) {
+      filePath = nextPath;
     }
   });
 </script>

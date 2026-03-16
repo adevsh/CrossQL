@@ -9,6 +9,8 @@ node_modules
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 SKILL.md
+SKILL-CrossQL-engine.md
 *.complete
 *.parquet
-current-condition.txt
+checklist-test-files.txt
+coverage/

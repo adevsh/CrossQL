@@ -7,11 +7,11 @@
   type Op = 'upper' | 'lower' | 'add' | 'concat';
   type RightKind = 'column' | 'literal';
 
-  let name = $state<string>(data.config?.name || 'derived');
-  let op = $state<Op>(data.config?.op || 'upper');
-  let left = $state<string>(data.config?.left || '');
-  let rightKind = $state<RightKind>(data.config?.right_kind || 'column');
-  let right = $state<string>(data.config?.right || '');
+  let name = $state<string>('derived');
+  let op = $state<Op>('upper');
+  let left = $state<string>('');
+  let rightKind = $state<RightKind>('column');
+  let right = $state<string>('');
 
   function updateConfig() {
     data.config = { name, op, left, right_kind: rightKind, right };
@@ -33,6 +33,20 @@
     if (s === 'error') return 'border-[#B85C4A] bg-[#B85C4A]';
     return 'border-warm-border bg-white';
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextName = typeof cfg.name === 'string' && cfg.name.trim() ? cfg.name : 'derived';
+    const nextOp: Op = cfg.op === 'lower' || cfg.op === 'add' || cfg.op === 'concat' ? cfg.op : 'upper';
+    const nextLeft = typeof cfg.left === 'string' ? cfg.left : '';
+    const nextRightKind: RightKind = cfg.right_kind === 'literal' ? 'literal' : 'column';
+    const nextRight = typeof cfg.right === 'string' ? cfg.right : '';
+    if (name !== nextName) name = nextName;
+    if (op !== nextOp) op = nextOp;
+    if (left !== nextLeft) left = nextLeft;
+    if (rightKind !== nextRightKind) rightKind = nextRightKind;
+    if (right !== nextRight) right = nextRight;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#C49A3C] border border-warm-border rounded shadow-sm w-[28rem]">
@@ -54,14 +68,15 @@
     </button>
   </div>
 
-  <div class="nodrag p-3 flex flex-col gap-3 relative" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
+  <div class="nodrag p-3 flex flex-col gap-3 relative" role="group" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
     <Handle type="target" position={Position.Left} class="!bg-[#C49A3C] !w-3 !h-3 !-left-1.5" />
     <Handle type="source" position={Position.Right} class="!bg-[#C49A3C] !w-3 !h-3" />
 
     <div class="grid grid-cols-2 gap-2">
       <div class="col-span-2">
-        <label class="text-xs text-warm-sub font-medium">New Column Name</label>
+        <label for="derived-name-{id}" class="text-xs text-warm-sub font-medium">New Column Name</label>
         <input
+          id="derived-name-{id}"
           type="text"
           bind:value={name}
           oninput={updateConfig}
@@ -71,8 +86,9 @@
       </div>
 
       <div>
-        <label class="text-xs text-warm-sub font-medium">Operation</label>
+        <label for="derived-op-{id}" class="text-xs text-warm-sub font-medium">Operation</label>
         <select
+          id="derived-op-{id}"
           bind:value={op}
           onchange={updateConfig}
           onpointerdown={stopFlowEvents}
@@ -86,8 +102,9 @@
       </div>
 
       <div>
-        <label class="text-xs text-warm-sub font-medium">Left Column</label>
+        <label for="derived-left-{id}" class="text-xs text-warm-sub font-medium">Left Column</label>
         <input
+          id="derived-left-{id}"
           type="text"
           bind:value={left}
           oninput={updateConfig}
@@ -99,8 +116,9 @@
 
       {#if op === 'add' || op === 'concat'}
         <div>
-          <label class="text-xs text-warm-sub font-medium">Right Kind</label>
+          <label for="derived-right-kind-{id}" class="text-xs text-warm-sub font-medium">Right Kind</label>
           <select
+            id="derived-right-kind-{id}"
             bind:value={rightKind}
             onchange={updateConfig}
             onpointerdown={stopFlowEvents}
@@ -111,8 +129,9 @@
           </select>
         </div>
         <div>
-          <label class="text-xs text-warm-sub font-medium">Right</label>
+          <label for="derived-right-{id}" class="text-xs text-warm-sub font-medium">Right</label>
           <input
+            id="derived-right-{id}"
             type="text"
             bind:value={right}
             oninput={updateConfig}

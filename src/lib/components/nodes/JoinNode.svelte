@@ -4,12 +4,9 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
 
-  const initialHow = data.config?.how;
-  let how = $state<'inner' | 'left' | 'outer'>(
-    initialHow === 'left' || initialHow === 'outer' ? initialHow : 'inner'
-  );
-  let leftOn = $state<string>(data.config?.left_on || '');
-  let rightOn = $state<string>(data.config?.right_on || '');
+  let how = $state<'inner' | 'left' | 'outer'>('inner');
+  let leftOn = $state<string>('');
+  let rightOn = $state<string>('');
 
   function updateConfig() {
     data.config = { how, left_on: leftOn, right_on: rightOn };
@@ -31,6 +28,16 @@
     if (s === 'error') return 'border-[#B85C4A] bg-[#B85C4A]';
     return 'border-warm-border bg-white';
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextHow: 'inner' | 'left' | 'outer' = cfg.how === 'left' || cfg.how === 'outer' ? cfg.how : 'inner';
+    const nextLeftOn = typeof cfg.left_on === 'string' ? cfg.left_on : '';
+    const nextRightOn = typeof cfg.right_on === 'string' ? cfg.right_on : '';
+    if (how !== nextHow) how = nextHow;
+    if (leftOn !== nextLeftOn) leftOn = nextLeftOn;
+    if (rightOn !== nextRightOn) rightOn = nextRightOn;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#C07A3A] border border-warm-border rounded shadow-sm w-80">
@@ -52,15 +59,16 @@
     </button>
   </div>
 
-  <div class="nodrag p-3 flex flex-col gap-3 relative" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
+  <div class="nodrag p-3 flex flex-col gap-3 relative" role="group" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
     <Handle id="left" type="target" position={Position.Left} class="!bg-[#C07A3A] !w-3 !h-3 !-left-1.5 !top-9" />
     <Handle id="right" type="target" position={Position.Left} class="!bg-[#C07A3A] !w-3 !h-3 !-left-1.5 !bottom-9" />
     <Handle type="source" position={Position.Right} class="!bg-[#C07A3A] !w-3 !h-3" />
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Join Type</label>
+        <label for="join-how-{id}" class="text-xs text-warm-sub font-medium">Join Type</label>
         <select
+          id="join-how-{id}"
           bind:value={how}
           onchange={updateConfig}
           onpointerdown={stopFlowEvents}
@@ -78,8 +86,9 @@
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Left Key</label>
+        <label for="join-left-on-{id}" class="text-xs text-warm-sub font-medium">Left Key</label>
         <input
+          id="join-left-on-{id}"
           type="text"
           bind:value={leftOn}
           oninput={updateConfig}
@@ -89,8 +98,9 @@
         />
       </div>
       <div>
-        <label class="text-xs text-warm-sub font-medium">Right Key</label>
+        <label for="join-right-on-{id}" class="text-xs text-warm-sub font-medium">Right Key</label>
         <input
+          id="join-right-on-{id}"
           type="text"
           bind:value={rightOn}
           oninput={updateConfig}

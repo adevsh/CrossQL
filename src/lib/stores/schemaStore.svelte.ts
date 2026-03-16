@@ -5,6 +5,10 @@ function isFileSourceType(nodeType: string): boolean {
   return nodeType === 'file' || nodeType === 'csv_source' || nodeType === 'parquet_source';
 }
 
+function supportsPreviewNode(nodeType: string): boolean {
+  return nodeType === 'join' || nodeType === 'schema_map' || nodeType === 'filter' || nodeType === 'select' || nodeType === 'rename' || nodeType === 'cast' || nodeType === 'derived';
+}
+
 function applySchemaMap(fields: Array<{ name: string; dtype: string }>, cfg: any) {
   const map = new Map<string, string>(fields.map((f) => [f.name, f.dtype]));
   const cols: any[] = cfg?.columns ?? [];
@@ -103,7 +107,7 @@ function createSchemaStore() {
     if (!selectedNodeId) return;
     const node = pipelineStore.nodes.find((n: any) => n.id === selectedNodeId);
     if (!node) return;
-    if (node.type !== 'join') return;
+    if (!supportsPreviewNode(node.type)) return;
 
     previewState = 'loading';
     try {
