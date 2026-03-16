@@ -4,9 +4,9 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
   
-  let contactPoints = $state(data.config?.contact_points || 'localhost:9042');
-  let keyspace = $state(data.config?.keyspace || '');
-  let query = $state(data.config?.query || 'SELECT * FROM table');
+  let contactPoints = $state('localhost:9042');
+  let keyspace = $state('');
+  let query = $state('SELECT * FROM table');
 
   function statusRingClass() {
     const s = data?.run_state;
@@ -28,6 +28,16 @@
     e.stopPropagation();
     await deleteElements({ nodes: [{ id }] });
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextContactPoints = typeof cfg.contact_points === 'string' ? cfg.contact_points : 'localhost:9042';
+    const nextKeyspace = typeof cfg.keyspace === 'string' ? cfg.keyspace : '';
+    const nextQuery = typeof cfg.query === 'string' ? cfg.query : 'SELECT * FROM table';
+    if (contactPoints !== nextContactPoints) contactPoints = nextContactPoints;
+    if (keyspace !== nextKeyspace) keyspace = nextKeyspace;
+    if (query !== nextQuery) query = nextQuery;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#6B5A9B] border border-warm-border rounded shadow-sm w-80">
@@ -51,8 +61,9 @@
 
   <div class="nodrag p-3 flex flex-col gap-3 relative">
     <div>
-      <label class="text-xs text-warm-sub font-medium">Contact Points</label>
+      <label for="cassandra-contact-points-{id}" class="text-xs text-warm-sub font-medium">Contact Points</label>
       <input
+        id="cassandra-contact-points-{id}"
         type="text"
         bind:value={contactPoints}
         oninput={updateConfig}
@@ -62,8 +73,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Keyspace</label>
+      <label for="cassandra-keyspace-{id}" class="text-xs text-warm-sub font-medium">Keyspace</label>
       <input
+        id="cassandra-keyspace-{id}"
         type="text"
         bind:value={keyspace}
         oninput={updateConfig}
@@ -72,8 +84,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">CQL Query</label>
+      <label for="cassandra-query-{id}" class="text-xs text-warm-sub font-medium">CQL Query</label>
       <textarea
+        id="cassandra-query-{id}"
         bind:value={query}
         oninput={updateConfig}
         class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-accent outline-none h-20 font-mono"

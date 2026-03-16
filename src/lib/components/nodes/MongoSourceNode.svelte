@@ -4,12 +4,12 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
   
-  let uri = $state(data.config?.uri || 'mongodb://localhost:27017');
-  let database = $state(data.config?.database || '');
-  let collection = $state(data.config?.collection || '');
-  let filter = $state(data.config?.filter || '{}');
-  let projection = $state(data.config?.projection || '{}');
-  let flattenDepth = $state(data.config?.flatten_depth ?? 1);
+  let uri = $state('mongodb://localhost:27017');
+  let database = $state('');
+  let collection = $state('');
+  let filter = $state('{}');
+  let projection = $state('{}');
+  let flattenDepth = $state(1);
 
   function statusRingClass() {
     const s = data?.run_state;
@@ -31,6 +31,22 @@
     e.stopPropagation();
     await deleteElements({ nodes: [{ id }] });
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextUri = typeof cfg.uri === 'string' ? cfg.uri : 'mongodb://localhost:27017';
+    const nextDatabase = typeof cfg.database === 'string' ? cfg.database : '';
+    const nextCollection = typeof cfg.collection === 'string' ? cfg.collection : '';
+    const nextFilter = typeof cfg.filter === 'string' ? cfg.filter : '{}';
+    const nextProjection = typeof cfg.projection === 'string' ? cfg.projection : '{}';
+    const nextFlattenDepth = typeof cfg.flatten_depth === 'number' ? cfg.flatten_depth : 1;
+    if (uri !== nextUri) uri = nextUri;
+    if (database !== nextDatabase) database = nextDatabase;
+    if (collection !== nextCollection) collection = nextCollection;
+    if (filter !== nextFilter) filter = nextFilter;
+    if (projection !== nextProjection) projection = nextProjection;
+    if (flattenDepth !== nextFlattenDepth) flattenDepth = nextFlattenDepth;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#4A7C59] border border-warm-border rounded shadow-sm w-80">
@@ -54,8 +70,9 @@
 
   <div class="nodrag p-3 flex flex-col gap-3 relative">
     <div>
-      <label class="text-xs text-warm-sub font-medium">URI</label>
+      <label for="mongo-uri-{id}" class="text-xs text-warm-sub font-medium">URI</label>
       <input
+        id="mongo-uri-{id}"
         type="text"
         bind:value={uri}
         oninput={updateConfig}
@@ -65,8 +82,9 @@
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Database</label>
+        <label for="mongo-database-{id}" class="text-xs text-warm-sub font-medium">Database</label>
         <input
+          id="mongo-database-{id}"
           type="text"
           bind:value={database}
           oninput={updateConfig}
@@ -74,8 +92,9 @@
         />
       </div>
       <div>
-        <label class="text-xs text-warm-sub font-medium">Collection</label>
+        <label for="mongo-collection-{id}" class="text-xs text-warm-sub font-medium">Collection</label>
         <input
+          id="mongo-collection-{id}"
           type="text"
           bind:value={collection}
           oninput={updateConfig}
@@ -86,8 +105,9 @@
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Flatten Depth</label>
+        <label for="mongo-flatten-depth-{id}" class="text-xs text-warm-sub font-medium">Flatten Depth</label>
         <input
+          id="mongo-flatten-depth-{id}"
           type="number"
           min="0"
           max="5"
@@ -102,8 +122,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Filter (JSON)</label>
+      <label for="mongo-filter-{id}" class="text-xs text-warm-sub font-medium">Filter (JSON)</label>
       <textarea
+        id="mongo-filter-{id}"
         bind:value={filter}
         oninput={updateConfig}
         class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-accent outline-none h-20 font-mono"
@@ -111,8 +132,9 @@
     </div>
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Projection (JSON)</label>
+      <label for="mongo-projection-{id}" class="text-xs text-warm-sub font-medium">Projection (JSON)</label>
       <textarea
+        id="mongo-projection-{id}"
         bind:value={projection}
         oninput={updateConfig}
         class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-accent outline-none h-16 font-mono"

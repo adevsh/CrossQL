@@ -1,4 +1,5 @@
 use crate::connectors::cassandra::CassandraConnector;
+use crate::connectors::file::FileConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::postgres::PostgresConnector;
@@ -15,12 +16,21 @@ use std::future::Future;
 use std::fs;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// Callback for per-node progress: (node_id, state) where state is "running" or "done".
 pub type NodeProgressFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 pub fn noop_progress() -> NodeProgressFn {
     Arc::new(|_node_id: &str, _state: &str| {})
+}
+
+fn ensure_not_cancelled(cancel: &CancellationToken) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err("Cancelled".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -81,6 +91,11 @@ pub struct CassandraSourceConfig {
     pub contact_points: String,
     pub keyspace: String,
     pub query: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct FileSourceConfig {
+    pub path: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -224,8 +239,10 @@ fn node_to_lazyframe<'a>(
     visiting: &'a mut HashSet<String>,
     error_on_null_cols: &'a mut Vec<String>,
     on_progress: &'a NodeProgressFn,
+    cancel: &'a CancellationToken,
 ) -> Pin<Box<dyn Future<Output = Result<LazyFrame, String>> + Send + 'a>> {
     Box::pin(async move {
+        ensure_not_cancelled(cancel)?;
         if let Some(lf) = cache.get(node_id) {
             return Ok(lf.clone());
         }
@@ -292,6 +309,37 @@ fn node_to_lazyframe<'a>(
             let df = CassandraConnector::fetch_dataframe(&cfg.contact_points, &cfg.keyspace, &cfg.query).await?;
             df.lazy()
         }
+        "file" | "csv_source" | "parquet_source" => {
+            let cfg: FileSourceConfig =
+                serde_json::from_value(node.data.as_ref().ok_or("Missing node data")?.config.clone())
+                    .map_err(|e| format!("Invalid file config: {}", e))?;
+            if cfg.path.trim().is_empty() {
+                return Err("File Source: no file path configured".to_string());
+            }
+            let ext = cfg
+                .path
+                .rsplit('.')
+                .next()
+                .map(|x| x.to_ascii_lowercase())
+                .unwrap_or_default();
+            if node.node_type == "csv_source" && ext != "csv" {
+                return Err("CSV Source only supports .csv files".to_string());
+            }
+            if node.node_type == "parquet_source" && ext != "parquet" {
+                return Err("Parquet Source only supports .parquet files".to_string());
+            }
+            // FileConnector::load_dataframe is synchronous blocking I/O.
+            // spawn_blocking is safe here because it does NOT call Polars collect internally
+            // (it reads raw bytes and builds the DataFrame directly for XLSX,
+            // or uses collect which for CSV/Parquet runs Polars' Rayon thread pool, not Tokio).
+            // If a nested-runtime panic is observed here, switch to std::thread::spawn.
+            let path = cfg.path.clone();
+            let df = tokio::task::spawn_blocking(move || FileConnector::load_dataframe(&path))
+                .await
+                .map_err(|e| format!("File read thread panicked: {}", e))??;
+            ensure_not_cancelled(cancel)?;
+            df.lazy()
+        }
         "schema_map" => {
             let inc = incoming_edges(edges, &node.id);
             if inc.len() != 1 {
@@ -306,6 +354,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
 
@@ -330,6 +379,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let cfg: FilterConfig =
@@ -351,6 +401,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let cfg: SelectConfig =
@@ -372,6 +423,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let cfg: RenameConfig =
@@ -393,6 +445,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let cfg: CastConfig =
@@ -414,6 +467,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let cfg: DerivedColumnConfig =
@@ -437,6 +491,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
             let right_lf = node_to_lazyframe(
@@ -447,6 +502,7 @@ fn node_to_lazyframe<'a>(
                 visiting,
                 error_on_null_cols,
                 on_progress,
+                cancel,
             )
             .await?;
 
@@ -468,6 +524,7 @@ fn node_to_lazyframe<'a>(
         visiting.remove(node_id);
         cache.insert(node_id.to_string(), lf.clone());
         on_progress(node_id, "done");
+        ensure_not_cancelled(cancel)?;
         Ok(lf)
     })
 }
@@ -481,6 +538,24 @@ impl PipelineEngine {
         compute_stats: bool,
         on_progress: NodeProgressFn,
     ) -> Result<PipelineRunResult, String> {
+        Self::run_with_cancel(
+            nodes,
+            edges,
+            compute_stats,
+            on_progress,
+            CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn run_with_cancel(
+        nodes: Vec<FlowNode>,
+        edges: Vec<FlowEdge>,
+        compute_stats: bool,
+        on_progress: NodeProgressFn,
+        cancel: CancellationToken,
+    ) -> Result<PipelineRunResult, String> {
+        ensure_not_cancelled(&cancel)?;
         let mut nodes_by_id: HashMap<String, FlowNode> = HashMap::new();
         for n in nodes {
             nodes_by_id.insert(n.id.clone(), n);
@@ -518,6 +593,7 @@ impl PipelineEngine {
             &mut visiting,
             &mut error_on_null_cols,
             &on_progress,
+            &cancel,
         )
         .await?;
 
@@ -527,15 +603,25 @@ impl PipelineEngine {
         // We use `std::thread::spawn` to create a completely clean OS thread.
         let out_node_id = out_node.id.clone();
         let on_progress_clone = on_progress.clone();
+        let cancel_clone = cancel.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = (|| -> Result<PipelineRunResult, String> {
+                if cancel_clone.is_cancelled() {
+                    return Err("Cancelled".to_string());
+                }
                 let df = lf
                     .collect()
                     .map_err(|e| format!("Failed to execute pipeline: {}", e))?;
+                if cancel_clone.is_cancelled() {
+                    return Err("Cancelled".to_string());
+                }
                 validate_no_nulls(&df, &error_on_null_cols)?;
 
                 let output_row_count = df.height();
+                if cancel_clone.is_cancelled() {
+                    return Err("Cancelled".to_string());
+                }
                 CrossQLParquetWriter::write_dataframe(
                     df,
                     &out_cfg.path,
@@ -552,6 +638,9 @@ impl PipelineEngine {
                 let node_stats: Vec<NodeStats> = if compute_stats {
                     let mut node_stats: Vec<NodeStats> = Vec::new();
                     for (id, lf) in cache.iter() {
+                        if cancel_clone.is_cancelled() {
+                            return Err("Cancelled".to_string());
+                        }
                         let node = nodes_by_id.get(id);
                         if let Some(n) = node {
                             if n.node_type == "join" {
@@ -607,6 +696,7 @@ impl PipelineEngine {
         let mut visiting: HashSet<String> = HashSet::new();
         let mut error_on_null_cols: Vec<String> = Vec::new();
         let progress = noop_progress();
+        let cancel = CancellationToken::new();
 
         let node = nodes_by_id
             .get(&node_id)
@@ -628,6 +718,7 @@ impl PipelineEngine {
                 &mut visiting,
                 &mut error_on_null_cols,
                 &progress,
+                &cancel,
             )
             .await?
             .limit(200);
@@ -639,6 +730,7 @@ impl PipelineEngine {
                 &mut visiting,
                 &mut error_on_null_cols,
                 &progress,
+                &cancel,
             )
             .await?
             .limit(200);
@@ -663,6 +755,7 @@ impl PipelineEngine {
                 &mut visiting,
                 &mut error_on_null_cols,
                 &progress,
+                &cancel,
             )
             .await?
         };

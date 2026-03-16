@@ -50,8 +50,13 @@ pub async fn query_parquet(path: String, sql: String) -> Result<QueryResult, Str
             for i in 0..total_rows {
                 let mut row: Vec<serde_json::Value> = Vec::new();
                 for (ci, _) in columns.iter().enumerate() {
-                    let s = df.select_at_idx(ci).unwrap();
-                    let val = format!("{}", s.get(i).unwrap());
+                    let s = df
+                        .select_at_idx(ci)
+                        .ok_or_else(|| format!("Column index out of bounds: {}", ci))?;
+                    let raw = s
+                        .get(i)
+                        .map_err(|e| format!("Failed to read row {} col {}: {}", i, ci, e))?;
+                    let val = format!("{}", raw);
                     let json_val = if val == "null" {
                         serde_json::Value::Null
                     } else if let Ok(n) = val.parse::<i64>() {

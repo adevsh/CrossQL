@@ -5,9 +5,9 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
 
-  let path = $state(data.config?.path || '');
-  let compression = $state(data.config?.compression || 'snappy');
-  let rowGroupSize = $state(data.config?.row_group_size || 524288);
+  let path = $state('');
+  let compression = $state('snappy');
+  let rowGroupSize = $state(524288);
 
   function updateConfig() {
     data.config = { path, compression, row_group_size: rowGroupSize };
@@ -42,6 +42,19 @@
     if (s === 'error') return 'border-[#B85C4A] bg-[#B85C4A]';
     return 'border-warm-border bg-white';
   }
+
+  $effect(() => {
+    const cfg = data?.config ?? {};
+    const nextPath = typeof cfg.path === 'string' ? cfg.path : '';
+    const nextCompression = typeof cfg.compression === 'string' ? cfg.compression : 'snappy';
+    const nextRowGroupSize =
+      typeof cfg.row_group_size === 'number' && Number.isFinite(cfg.row_group_size)
+        ? cfg.row_group_size
+        : 524288;
+    if (path !== nextPath) path = nextPath;
+    if (compression !== nextCompression) compression = nextCompression;
+    if (rowGroupSize !== nextRowGroupSize) rowGroupSize = nextRowGroupSize;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#4A7C59] border border-warm-border rounded shadow-sm w-72">
@@ -70,9 +83,10 @@
     <Handle type="target" position={Position.Left} class="!bg-[#4A7C59] !w-3 !h-3 !-left-1.5" />
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Output Path</label>
+      <label for="output-path-{id}" class="text-xs text-warm-sub font-medium">Output Path</label>
       <div class="flex gap-1">
         <input 
+          id="output-path-{id}"
           type="text" 
           bind:value={path} 
           oninput={updateConfig}
@@ -89,8 +103,9 @@
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-xs text-warm-sub font-medium">Compression</label>
+        <label for="output-compression-{id}" class="text-xs text-warm-sub font-medium">Compression</label>
         <select 
+          id="output-compression-{id}"
           bind:value={compression} 
           onchange={updateConfig}
           class="w-full text-xs px-2 py-1 border border-warm-border rounded focus:border-accent outline-none bg-white"
@@ -103,8 +118,9 @@
         </select>
       </div>
       <div>
-        <label class="text-xs text-warm-sub font-medium">Row Group</label>
+        <label for="output-row-group-{id}" class="text-xs text-warm-sub font-medium">Row Group</label>
         <input 
+          id="output-row-group-{id}"
           type="number" 
           bind:value={rowGroupSize} 
           oninput={updateConfig}

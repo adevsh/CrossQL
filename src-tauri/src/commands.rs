@@ -2,6 +2,7 @@ use crate::connectors::postgres::PostgresConnector;
 use crate::connectors::mysql::MysqlConnector;
 use crate::connectors::mongodb::MongoConnector;
 use crate::connectors::cassandra::CassandraConnector;
+use crate::connectors::file::FileConnector;
 use crate::engine::pipeline::{FlowEdge, FlowNode, NodeProgressFn, PipelineEngine, PipelineRunResult, PreviewResult, noop_progress};
 use crate::run_manager::RunEntry;
 use crate::run_manager::RunManager;
@@ -9,6 +10,7 @@ use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 use tauri::Emitter;
+use tokio::time::Duration;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -106,6 +108,7 @@ pub async fn start_pipeline_run(
     edges: Vec<FlowEdge>,
 ) -> Result<String, String> {
     let (run_id, entry) = run_manager.create_run().await;
+    let run_manager_ref: Arc<RunManager> = run_manager.inner().clone();
     let run_id_clone = run_id.clone();
     let app_clone = app.clone();
     let entry_clone: Arc<RunEntry> = entry.clone();
@@ -140,11 +143,14 @@ pub async fn start_pipeline_run(
             );
         });
 
-        let run_fut = PipelineEngine::run(nodes, edges, false, on_progress);
-        let outcome = tokio::select! {
-            _ = entry_clone.cancel.cancelled() => Err("Cancelled".to_string()),
-            res = run_fut => res,
-        };
+        let outcome = PipelineEngine::run_with_cancel(
+            nodes,
+            edges,
+            false,
+            on_progress,
+            entry_clone.cancel.clone(),
+        )
+        .await;
 
         match outcome {
             Ok(result) => {
@@ -180,6 +186,13 @@ pub async fn start_pipeline_run(
                 );
             }
         }
+
+        let cleanup_run_id = run_id_clone.clone();
+        let cleanup_run_manager = run_manager_ref.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(300)).await;
+            cleanup_run_manager.finish_run(&cleanup_run_id).await;
+        });
     });
 
     Ok(run_id)
@@ -282,4 +295,19 @@ pub async fn preview_cassandra_schema(source: CassandraConfig) -> Result<Vec<Sch
         .into_iter()
         .map(|(name, dtype)| SchemaField { name, dtype })
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_file_schema(path: String) -> Result<Vec<SchemaField>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = FileConnector::describe_schema(&path)
+            .map(|fields| 
+                fields.into_iter()
+                    .map(|(name, dtype)| SchemaField { name, dtype })
+                    .collect::<Vec<_>>()
+            );
+        let _ = tx.send(result);
+    });
+    rx.await.map_err(|_| "Schema thread panicked".to_string())?
 }

@@ -11,6 +11,9 @@ export type NodeType =
   | 'mysql' 
   | 'mongodb' 
   | 'cassandra' 
+  | 'file'
+  | 'csv_source'
+  | 'parquet_source'
   | 'join' 
   | 'schema_map' 
   | 'filter' 
@@ -38,6 +41,7 @@ export type NodeConfig =
   | MySQLConfig 
   | MongoConfig 
   | CassandraConfig 
+  | FileSourceConfig
   | JoinConfig 
   | SchemaMapConfig
   | FilterConfig
@@ -130,4 +134,8 @@ export interface ParquetConfig {
   path: string;
   compression: 'snappy' | 'zstd' | 'gzip' | 'lz4' | 'none';
   row_group_size?: number;
+}
+
+export interface FileSourceConfig {
+  path: string;
 }

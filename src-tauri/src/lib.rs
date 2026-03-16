@@ -27,7 +27,8 @@ pub fn run() {
             commands::preview_cassandra_schema,
             pipeline_io::save_pipeline,
             pipeline_io::load_pipeline,
-            parquet_query::query_parquet
+            parquet_query::query_parquet,
+            commands::get_file_schema
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

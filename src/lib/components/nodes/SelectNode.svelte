@@ -4,7 +4,7 @@
   let { id, data } = $props();
   const { deleteElements } = useSvelteFlow();
 
-  let columnsText = $state<string>((data.config?.columns ?? []).join(', '));
+  let columnsText = $state<string>('');
 
   function parseColumns(text: string) {
     return text
@@ -33,6 +33,12 @@
     if (s === 'error') return 'border-[#B85C4A] bg-[#B85C4A]';
     return 'border-warm-border bg-white';
   }
+
+  $effect(() => {
+    const cols = Array.isArray(data?.config?.columns) ? data.config.columns : [];
+    const nextColumnsText = cols.join(', ');
+    if (columnsText !== nextColumnsText) columnsText = nextColumnsText;
+  });
 </script>
 
 <div class="bg-white border-l-4 border-l-[#C49A3C] border border-warm-border rounded shadow-sm w-80">
@@ -54,13 +60,14 @@
     </button>
   </div>
 
-  <div class="nodrag p-3 flex flex-col gap-3 relative" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
+  <div class="nodrag p-3 flex flex-col gap-3 relative" role="group" onpointerdown={stopFlowEvents} onwheel={stopFlowEvents}>
     <Handle type="target" position={Position.Left} class="!bg-[#C49A3C] !w-3 !h-3 !-left-1.5" />
     <Handle type="source" position={Position.Right} class="!bg-[#C49A3C] !w-3 !h-3" />
 
     <div>
-      <label class="text-xs text-warm-sub font-medium">Columns (comma separated)</label>
+      <label for="select-columns-{id}" class="text-xs text-warm-sub font-medium">Columns (comma separated)</label>
       <textarea
+        id="select-columns-{id}"
         bind:value={columnsText}
         oninput={updateConfig}
         onpointerdown={stopFlowEvents}

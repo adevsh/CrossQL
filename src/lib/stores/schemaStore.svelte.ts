@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { pipelineStore } from './pipelineStore.svelte';
 
+function isFileSourceType(nodeType: string): boolean {
+  return nodeType === 'file' || nodeType === 'csv_source' || nodeType === 'parquet_source';
+}
+
+function supportsPreviewNode(nodeType: string): boolean {
+  return nodeType === 'join' || nodeType === 'schema_map' || nodeType === 'filter' || nodeType === 'select' || nodeType === 'rename' || nodeType === 'cast' || nodeType === 'derived';
+}
+
 function applySchemaMap(fields: Array<{ name: string; dtype: string }>, cfg: any) {
   const map = new Map<string, string>(fields.map((f) => [f.name, f.dtype]));
   const cols: any[] = cfg?.columns ?? [];
@@ -33,11 +41,18 @@ async function fetchSchemaForNode(nodeId: string, depth = 0): Promise<Array<{ na
     return applySchemaMap(upstreamSchema, node.data?.config);
   }
 
-  if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra') {
+  if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && !isFileSourceType(node.type)) {
     throw new Error('Schema preview is only available for source and Schema Map nodes');
   }
 
   if (!node.data?.config) throw new Error('Missing node config');
+
+  if (isFileSourceType(node.type)) {
+    const path = node.data.config?.path ?? '';
+    if (!path) throw new Error('File path not configured');
+    const result = await invoke('get_file_schema', { path });
+    return (result as any[])?.map((x: any) => ({ name: x.name, dtype: x.dtype })) ?? [];
+  }
 
   const command =
     node.type === 'postgres'
@@ -70,7 +85,7 @@ function createSchemaStore() {
     if (!selectedNodeId) return;
     const node = pipelineStore.nodes.find((n: any) => n.id === selectedNodeId);
     if (!node) return;
-    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && node.type !== 'schema_map') return;
+    if (node.type !== 'postgres' && node.type !== 'mysql' && node.type !== 'mongodb' && node.type !== 'cassandra' && !isFileSourceType(node.type) && node.type !== 'schema_map') return;
 
     schemaState = 'loading';
     try {
@@ -92,7 +107,7 @@ function createSchemaStore() {
     if (!selectedNodeId) return;
     const node = pipelineStore.nodes.find((n: any) => n.id === selectedNodeId);
     if (!node) return;
-    if (node.type !== 'join') return;
+    if (!supportsPreviewNode(node.type)) return;
 
     previewState = 'loading';
     try {

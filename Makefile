@@ -1,4 +1,4 @@
-.PHONY: dev build check check-rs check-fe install clean docker-up docker-down
+.PHONY: dev build check check-rs check-fe coverage-rs coverage-rs-lcov coverage-rs-summary install clean docker-up docker-down
 
 # Development
 dev:
@@ -13,6 +13,21 @@ check: check-rs check-fe
 
 check-rs:
 	cd src-tauri && cargo check
+
+coverage-rs:
+	cd src-tauri && (cargo llvm-cov --version >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked)
+	cd src-tauri && rustup component add llvm-tools-preview --toolchain $$(rustup show active-toolchain | awk '{print $$1}')
+	cd src-tauri && cargo llvm-cov --workspace --tests --html --output-dir coverage/html
+
+coverage-rs-lcov:
+	cd src-tauri && (cargo llvm-cov --version >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked)
+	cd src-tauri && rustup component add llvm-tools-preview --toolchain $$(rustup show active-toolchain | awk '{print $$1}')
+	cd src-tauri && cargo llvm-cov --workspace --tests --lcov --output-path coverage/lcov.info
+
+coverage-rs-summary:
+	cd src-tauri && (cargo llvm-cov --version >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked)
+	cd src-tauri && rustup component add llvm-tools-preview --toolchain $$(rustup show active-toolchain | awk '{print $$1}')
+	cd src-tauri && cargo llvm-cov --workspace --tests --summary-only
 
 check-fe:
 	bun run check

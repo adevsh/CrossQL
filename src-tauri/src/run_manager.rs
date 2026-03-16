@@ -86,3 +86,42 @@ impl RunManager {
         runs.remove(run_id);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn await_run_returns_result_and_removes_entry() {
+        let manager = RunManager::default();
+        let (run_id, entry) = manager.create_run().await;
+        entry.set_result(Ok(serde_json::json!({ "ok": true }))).await;
+
+        let result = manager.await_run(&run_id).await.unwrap();
+        assert_eq!(result["ok"], true);
+
+        let missing = manager.await_run(&run_id).await;
+        assert!(missing.is_err());
+    }
+
+    #[tokio::test]
+    async fn cancel_run_cancels_token() {
+        let manager = RunManager::default();
+        let (run_id, entry) = manager.create_run().await;
+
+        let cancelled = manager.cancel_run(&run_id).await;
+        assert!(cancelled);
+        assert!(entry.cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn finish_run_removes_without_await() {
+        let manager = RunManager::default();
+        let (run_id, _) = manager.create_run().await;
+
+        manager.finish_run(&run_id).await;
+
+        let missing = manager.await_run(&run_id).await;
+        assert!(missing.is_err());
+    }
+}
