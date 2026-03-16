@@ -1,4 +1,4 @@
-.PHONY: dev build check check-rs check-fe coverage-rs coverage-rs-lcov coverage-rs-summary install clean docker-up docker-down
+.PHONY: dev build check check-rs check-fe engine-dev engine-build engine-check check-all test-shared test-engine test-ui test-all coverage-rs coverage-rs-lcov coverage-rs-summary install clean docker-up docker-down observability-up observability-down
 
 # Development
 dev:
@@ -10,6 +10,8 @@ build:
 
 # Run all checks (Rust + Frontend)
 check: check-rs check-fe
+
+check-all: check engine-check
 
 check-rs:
 	cd src-tauri && cargo check
@@ -32,6 +34,27 @@ coverage-rs-summary:
 check-fe:
 	bun run check
 
+engine-dev:
+	cargo run -p crossql-engine
+
+engine-build:
+	cargo build -p crossql-engine --release
+
+engine-check:
+	cargo check -p crossql-engine
+	cargo clippy -p crossql-engine
+
+test-shared:
+	cargo test -p crossql-shared
+
+test-engine:
+	cargo test -p crossql-engine
+
+test-ui:
+	bun run test
+
+test-all: test-shared test-engine test-ui
+
 # Install frontend dependencies
 install:
 	bun install
@@ -47,3 +70,9 @@ docker-up:
 
 docker-down:
 	docker-compose down
+
+observability-up:
+	docker compose --profile engine --profile observability up -d
+
+observability-down:
+	docker compose --profile engine --profile observability down

@@ -46,6 +46,45 @@ services:
       - cassandra_data:/var/lib/cassandra
     networks:
       - crossql-network
+  crossql-engine:
+    profiles: ["engine"]
+    image: rust:1.89
+    working_dir: /workspace
+    command: >
+      sh -c "cargo run -p crossql-engine"
+    environment:
+      CROSSQL_API_KEY: ${CROSSQL_API_KEY:-test-key}
+      CROSSQL_OUTPUT_DIR: /tmp/crossql-output
+      CROSSQL_PORT: 7070
+    ports:
+      - "7070:7070"
+    volumes:
+      - ./:/workspace
+    networks:
+      - crossql-network
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - crossql-network
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - crossql-network
 
 volumes:
   mysql_data:
@@ -55,6 +94,8 @@ volumes:
   mongodb_data:
     driver: local
   cassandra_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:

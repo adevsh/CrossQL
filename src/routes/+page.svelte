@@ -59,7 +59,7 @@
   });
 </script>
 
-<div class="flex h-screen w-full bg-warm-bg overflow-hidden">
+<div class="flex h-[calc(100vh-49px)] w-full bg-warm-bg overflow-hidden">
   <SidebarPalette />
 
   <!-- Main Canvas Area -->
