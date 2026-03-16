@@ -70,13 +70,16 @@ function createSchemaStore() {
   let schemaState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
   let schemaError = $state<string | null>(null);
   let schemaFields = $state<Array<{ name: string; dtype: string }>>([]);
+  let schemaRequestToken = 0;
 
   let previewState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
   let previewError = $state<string | null>(null);
   let previewColumns = $state<string[]>([]);
   let previewRows = $state<any[]>([]);
+  let previewRequestToken = 0;
 
   async function loadSchema() {
+    const requestToken = ++schemaRequestToken;
     schemaState = 'idle';
     schemaError = null;
     schemaFields = [];
@@ -89,15 +92,19 @@ function createSchemaStore() {
 
     schemaState = 'loading';
     try {
-      schemaFields = await fetchSchemaForNode(selectedNodeId);
+      const fields = await fetchSchemaForNode(selectedNodeId);
+      if (requestToken !== schemaRequestToken || pipelineStore.selectedNodeId !== selectedNodeId) return;
+      schemaFields = fields;
       schemaState = 'ready';
     } catch (e) {
+      if (requestToken !== schemaRequestToken || pipelineStore.selectedNodeId !== selectedNodeId) return;
       schemaState = 'error';
       schemaError = `${e}`;
     }
   }
 
   async function loadPreview() {
+    const requestToken = ++previewRequestToken;
     previewState = 'idle';
     previewError = null;
     previewColumns = [];
@@ -112,11 +119,13 @@ function createSchemaStore() {
     previewState = 'loading';
     try {
       const result = await invoke('preview_pipeline_node', { nodes: pipelineStore.nodes, edges: pipelineStore.edges, nodeId: selectedNodeId });
+      if (requestToken !== previewRequestToken || pipelineStore.selectedNodeId !== selectedNodeId) return;
       const r = result as any;
       previewColumns = Array.isArray(r?.columns) ? r.columns : [];
       previewRows = Array.isArray(r?.rows) ? r.rows : [];
       previewState = 'ready';
     } catch (e) {
+      if (requestToken !== previewRequestToken || pipelineStore.selectedNodeId !== selectedNodeId) return;
       previewState = 'error';
       previewError = `${e}`;
     }

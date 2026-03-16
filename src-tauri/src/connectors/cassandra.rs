@@ -57,7 +57,35 @@ impl CassandraConnector {
         }
 
         if rows.is_empty() {
-            return Err("Query returned no rows".to_string());
+            let empty_columns: Vec<PolarsColumn> = col_specs
+                .iter()
+                .map(|spec| {
+                    let s = match spec.col_type.id {
+                        ColType::Bigint
+                        | ColType::Counter
+                        | ColType::Int
+                        | ColType::Smallint
+                        | ColType::Tinyint
+                        | ColType::Varint => {
+                            Series::new_empty(spec.name.as_str().into(), &DataType::Int64)
+                        }
+                        ColType::Float | ColType::Double | ColType::Decimal => {
+                            Series::new_empty(spec.name.as_str().into(), &DataType::Float64)
+                        }
+                        ColType::Boolean => {
+                            Series::new_empty(spec.name.as_str().into(), &DataType::Boolean)
+                        }
+                        ColType::Timestamp => Series::new_empty(
+                            spec.name.as_str().into(),
+                            &DataType::Datetime(TimeUnit::Milliseconds, None),
+                        ),
+                        _ => Series::new_empty(spec.name.as_str().into(), &DataType::String),
+                    };
+                    PolarsColumn::from(s)
+                })
+                .collect();
+            return DataFrame::new(0, empty_columns)
+                .map_err(|e| format!("Failed to create DataFrame: {}", e));
         }
 
         let height = rows.len();

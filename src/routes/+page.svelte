@@ -35,6 +35,8 @@
     return () => {
       unlistenPromise.then((u) => u());
       clearInterval(usageInterval);
+      clearTimeout(schemaTimer);
+      clearTimeout(previewTimer);
       window.removeEventListener('keydown', handleKeydown);
     };
   });

@@ -26,13 +26,36 @@ impl PostgresConnector {
             .await
             .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
 
+        let described = (&pool)
+            .describe(query)
+            .await
+            .map_err(|e| format!("Failed to describe query: {}", e))?;
+
         let rows = sqlx::query(query)
             .fetch_all(&pool)
             .await
             .map_err(|e| format!("Failed to execute query: {}", e))?;
 
         if rows.is_empty() {
-            return Err("Query returned no rows".to_string());
+            let empty_columns: Vec<PolarsColumn> = described
+                .columns()
+                .iter()
+                .map(|c| {
+                    let s = match c.type_info().name() {
+                        "INT2" | "INT4" | "INT8" => {
+                            Series::new_empty(c.name().into(), &DataType::Int64)
+                        }
+                        "FLOAT4" | "FLOAT8" | "NUMERIC" => {
+                            Series::new_empty(c.name().into(), &DataType::Float64)
+                        }
+                        "BOOL" => Series::new_empty(c.name().into(), &DataType::Boolean),
+                        _ => Series::new_empty(c.name().into(), &DataType::String),
+                    };
+                    PolarsColumn::from(s)
+                })
+                .collect();
+            return DataFrame::new(0, empty_columns)
+                .map_err(|e| format!("Failed to create DataFrame: {}", e));
         }
 
         // Basic implementation: Convert SQLx rows to Polars DataFrame
