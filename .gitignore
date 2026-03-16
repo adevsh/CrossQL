@@ -14,3 +14,4 @@ SKILL-CrossQL-engine.md
 *.parquet
 checklist-test-files.txt
 coverage/
+target/
