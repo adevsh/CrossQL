@@ -1,0 +1,3 @@
+[workspace]
+members = ["src-tauri", "crossql-shared", "crossql-engine"]
+resolver = "2"

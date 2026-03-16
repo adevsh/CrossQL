@@ -24,6 +24,7 @@ function createFileStore() {
   let isDirty = $state(false);
   let recentPipelines = $state<RecentEntry[]>([]);
   let showHomeScreen = $state(true);
+  let loadError = $state<string | null>(null);
 
   function serializePipeline(): string {
     return JSON.stringify({
@@ -35,7 +36,15 @@ function createFileStore() {
   }
 
   function restorePipeline(json: string) {
-    const data = JSON.parse(json);
+    let data: any;
+    try {
+      data = JSON.parse(json);
+    } catch {
+      throw new Error('Invalid pipeline JSON format');
+    }
+    if (!data || typeof data !== 'object') {
+      throw new Error('Pipeline file must contain a JSON object');
+    }
     if (data.meta) {
       pipelineMeta = {
         name: data.meta.name || 'Untitled Pipeline',
@@ -108,6 +117,7 @@ function createFileStore() {
   }
 
   async function loadPipeline(filePath?: string) {
+    loadError = null;
     let path = filePath;
     if (!path) {
       const selected = await open({
@@ -118,11 +128,17 @@ function createFileStore() {
       if (!selected) return;
       path = selected;
     }
-    const json = await invoke<string>('load_pipeline', { path });
-    restorePipeline(json);
-    currentFilePath = path;
-    showHomeScreen = false;
-    await addToRecent(path, pipelineMeta.name);
+    try {
+      const json = await invoke<string>('load_pipeline', { path });
+      restorePipeline(json);
+      currentFilePath = path;
+      showHomeScreen = false;
+      await addToRecent(path, pipelineMeta.name);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : `${e}`;
+      loadError = `Failed to load pipeline: ${message}`;
+      console.error(loadError);
+    }
   }
 
   function newPipeline() {
@@ -152,6 +168,7 @@ function createFileStore() {
     set pipelineMeta(v: PipelineMeta) { pipelineMeta = v; isDirty = true; },
     get isDirty() { return isDirty; },
     get recentPipelines() { return recentPipelines; },
+    get loadError() { return loadError; },
     get showHomeScreen() { return showHomeScreen; },
     set showHomeScreen(v: boolean) { showHomeScreen = v; },
     savePipeline,

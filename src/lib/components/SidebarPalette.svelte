@@ -1,6 +1,7 @@
 <script lang="ts">
   import { pipelineStore } from '$lib/stores/pipelineStore.svelte';
   import { fileStore } from '$lib/stores/fileStore.svelte';
+  import SendToEngineButton from '$lib/components/SendToEngineButton.svelte';
   import PipelineMetaForm from './PipelineMetaForm.svelte';
 
   function addNode(type: Parameters<typeof pipelineStore.addNode>[0]) {
@@ -30,6 +31,7 @@
       class="flex-1 px-2 py-1.5 text-xs bg-white border border-warm-border rounded text-warm-text hover:bg-warm-light transition-colors"
       title="Save Pipeline (⌘S)"
     >Save</button>
+    <SendToEngineButton />
   </div>
 
   <!-- Node Palette -->

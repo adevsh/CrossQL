@@ -37,7 +37,8 @@ impl MongoConnector {
         .await?;
 
         if docs.is_empty() {
-            return Err("Query returned no documents".to_string());
+            return DataFrame::new(0, Vec::new())
+                .map_err(|e| format!("Failed to create DataFrame: {}", e));
         }
 
         let height = docs.len();

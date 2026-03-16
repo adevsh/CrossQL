@@ -1,0 +1,28 @@
+[package]
+name = "crossql-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossql-shared = { path = "../crossql-shared" }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+polars = { version = "0.53.0", features = [
+  "lazy", "parquet", "json", "csv", "dtype-datetime", "dtype-categorical", "strings", "regex", "sql"
+] }
+sqlx = { version = "0.8", features = [
+  "postgres", "mysql", "runtime-tokio", "tls-rustls", "chrono", "uuid"
+] }
+mongodb = "3"
+futures-util = "0.3"
+cdrs-tokio = "9"
+tokio-util = "0.7"

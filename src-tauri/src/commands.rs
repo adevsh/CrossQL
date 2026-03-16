@@ -154,21 +154,37 @@ pub async fn start_pipeline_run(
 
         match outcome {
             Ok(result) => {
-                let payload = serde_json::to_value(&result).ok();
-                let _ = entry_clone
-                    .set_result(payload.clone().ok_or_else(|| "Failed to serialize result".to_string()))
-                    .await;
-                emit_pipeline_event(
-                    &app_clone,
-                    PipelineEvent {
-                        run_id: run_id_clone.clone(),
-                        kind: "run_finished".to_string(),
-                        node_id: None,
-                        state: None,
-                        message: None,
-                        result: payload,
-                    },
-                );
+                match serde_json::to_value(&result) {
+                    Ok(payload) => {
+                        entry_clone.set_result(Ok(payload.clone())).await;
+                        emit_pipeline_event(
+                            &app_clone,
+                            PipelineEvent {
+                                run_id: run_id_clone.clone(),
+                                kind: "run_finished".to_string(),
+                                node_id: None,
+                                state: None,
+                                message: None,
+                                result: Some(payload),
+                            },
+                        );
+                    }
+                    Err(err) => {
+                        let msg = format!("Failed to serialize result: {}", err);
+                        entry_clone.set_result(Err(msg.clone())).await;
+                        emit_pipeline_event(
+                            &app_clone,
+                            PipelineEvent {
+                                run_id: run_id_clone.clone(),
+                                kind: "run_error".to_string(),
+                                node_id: None,
+                                state: None,
+                                message: Some(msg),
+                                result: None,
+                            },
+                        );
+                    }
+                }
             }
             Err(err) => {
                 let kind = if err == "Cancelled" { "run_cancelled" } else { "run_error" };
